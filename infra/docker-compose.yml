@@ -1,0 +1,141 @@
+# Wiki — standalone Docker Compose stack for Docker Desktop.
+#
+# Container ports:
+#   Every module in this ecosystem binds :8080 inside its container.
+#   The HOST port for Wiki is 8140 (API) and 3007 (SPA). Mapping below.
+#
+# Object storage: a local MinIO (LOCAL DEV ONLY, never production) holds
+# the `wiki-data-dev` bucket; the backend creates the bucket on start.
+#
+# Migrations: the `migrate` service is a ONE-SHOT. The backend depends on
+# it with service_completed_successfully so cmd/server never runs
+# migrations itself.
+#
+# Reserved HOST ports (Wiki module):
+#   backend   : 8140  (container :8080)
+#   frontend  : 3007  (container :80)
+#   postgres  : 5439  (container :5432)
+#   minio     : 9040 API, 9041 console
+
+name: wiki
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: wiki-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: wiki
+      POSTGRES_PASSWORD: wiki
+      POSTGRES_DB: wiki
+    ports:
+      - "5439:5432"
+    volumes:
+      - wiki-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wiki -d wiki"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: wiki-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: wiki
+      MINIO_ROOT_PASSWORD: wikiwikidev
+    ports:
+      - "9040:9000"
+      - "9041:9001"
+    volumes:
+      - wiki-minio-data:/data
+
+  # One-shot migrator. Exits zero on success; the backend waits for that.
+  migrate:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.migrate
+    container_name: wiki-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgres://wiki:wiki@postgres:5432/wiki?sslmode=disable
+    restart: "no"
+
+  backend:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.backend
+    container_name: wiki-backend
+    restart: unless-stopped
+    # Shutdown closes live connections and ships buffered edits to S3.
+    stop_grace_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      minio:
+        condition: service_started
+    environment:
+      APP_ENV: development
+      # Browser-facing base URL uses the HOST port so links in logs /
+      # dev tooling point at something a human can click.
+      APP_BASE_URL: http://localhost:8140
+      # Container binds :8080 (ecosystem convention). Compose maps 8140 -> 8080.
+      HTTP_ADDR: ":8080"
+      DATABASE_URL: postgres://wiki:wiki@postgres:5432/wiki?sslmode=disable
+      # Auth: dev = X-Dev-User / X-Dev-Groups headers; oidc = verify Bearer JWT.
+      AUTH_MODE: ${AUTH_MODE:-dev}
+      DEV_DEFAULT_USER: dev-admin
+      DEV_DEFAULT_GROUPS: wiki-admin
+      OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+      ACCESS_CONFIG_PATH: /etc/wiki/access-config.toml
+      # Pairing with Den happens in the app (Settings → Den connection).
+      # Set this when the pairing URL Den shows is not reachable from here.
+      DEN_INTERNAL_URL: ${DEN_INTERNAL_URL:-}
+      # CORS only matters for `npm run dev` on the host — in prod the SPA
+      # talks to /api via the nginx reverse proxy on the same origin.
+      CORS_ALLOWED_ORIGINS: http://localhost:3007
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: wiki-data-dev
+      S3_ACCESS_KEY_ID: wiki
+      S3_SECRET_ACCESS_KEY: wikiwikidev
+      S3_REGION: us-east-1
+      S3_USE_PATH_STYLE: "true"
+      # Edits wait here (at most ~5s) before going to S3; one replica only.
+      WIKI_BUFFER_DIR: /var/lib/wiki/buffer
+    volumes:
+      - ./access-config.toml:/etc/wiki/access-config.toml:ro
+      - wiki-buffer:/var/lib/wiki/buffer
+    ports:
+      - "8140:8080"
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.frontend
+      args:
+        VITE_AUTH_MODE: ${VITE_AUTH_MODE:-dev}
+        VITE_OIDC_AUTHORITY: ${VITE_OIDC_AUTHORITY:-}
+        VITE_OIDC_CLIENT_ID: ${VITE_OIDC_CLIENT_ID:-}
+        VITE_OIDC_SCOPE: ${VITE_OIDC_SCOPE:-openid profile email}
+        VITE_PRODUCT_NAME: ${VITE_PRODUCT_NAME:-Wiki}
+        WIKI_VERSION: ${WIKI_VERSION:-dev}
+    container_name: wiki-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3007:80"
+
+volumes:
+  wiki-postgres-data:
+  wiki-minio-data:
+  wiki-buffer:

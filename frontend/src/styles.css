@@ -1,0 +1,113 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Wiki neutral theme. Shaped like the Stash tokens so UI primitives can be
+ * copied between products, but intentionally brand-neutral — a convention
+ * can override every variable via the brand.json CSS variables map.
+ */
+@layer base {
+  :root {
+    --wiki-shadow-card: 0 10px 30px rgba(36, 30, 32, 0.1);
+    --wiki-shadow-pop: 0 16px 45px rgba(36, 30, 32, 0.16);
+
+    /* Light theme defaults (Shadow Grey text on white surfaces). */
+    --background: 0 0% 100%;
+    --foreground: 240 6% 13%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 6% 13%;
+    --primary: 243 75% 59%;
+    --primary-hover: 243 65% 52%;
+    --primary-soft: 243 84% 95%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 7% 96%;
+    --secondary-foreground: 240 6% 13%;
+    --muted: 240 7% 96%;
+    --muted-foreground: 240 5% 41%;
+    --accent: 243 84% 95%;
+    --accent-foreground: 243 60% 42%;
+    --destructive: 0 76% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 152 55% 32%;
+    --warning: 32 90% 38%;
+    --border: 240 8% 88%;
+    --input: 240 8% 88%;
+    --ring: 243 75% 59%;
+    --radius: 0.875rem;
+  }
+
+  .dark {
+    --background: 240 6% 10%;
+    --foreground: 240 10% 96%;
+    --card: 240 6% 13%;
+    --card-foreground: 240 10% 96%;
+    --primary: 243 75% 59%;
+    --primary-hover: 243 70% 65%;
+    --primary-soft: 243 35% 21%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 7% 18%;
+    --secondary-foreground: 240 10% 96%;
+    --muted: 240 7% 18%;
+    --muted-foreground: 240 6% 67%;
+    --accent: 243 28% 21%;
+    --accent-foreground: 243 85% 82%;
+    --destructive: 0 70% 52%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 152 45% 58%;
+    --warning: 38 90% 60%;
+    --border: 240 6% 22%;
+    --input: 240 6% 22%;
+
+    --wiki-shadow-card: 0 10px 30px rgba(0, 0, 0, 0.35);
+    --wiki-shadow-pop: 0 16px 45px rgba(0, 0, 0, 0.5);
+
+    color-scheme: dark;
+  }
+}
+
+/* BlockNote in the suite's colours (both schemes read the same tokens). */
+.wiki-editor.bn-container[data-color-scheme] {
+  --bn-font-family: inherit;
+  --bn-border-radius: 0.625rem;
+  --bn-colors-editor-text: hsl(var(--foreground));
+  --bn-colors-editor-background: transparent;
+  --bn-colors-menu-text: hsl(var(--card-foreground));
+  --bn-colors-menu-background: hsl(var(--card));
+  --bn-colors-tooltip-text: hsl(var(--secondary-foreground));
+  --bn-colors-tooltip-background: hsl(var(--secondary));
+  --bn-colors-hovered-text: hsl(var(--foreground));
+  --bn-colors-hovered-background: hsl(var(--secondary));
+  --bn-colors-selected-text: hsl(var(--primary-foreground));
+  --bn-colors-selected-background: hsl(var(--primary));
+  --bn-colors-disabled-text: hsl(var(--muted-foreground));
+  --bn-colors-disabled-background: hsl(var(--muted));
+  --bn-colors-shadow: hsl(var(--border));
+  --bn-colors-border: hsl(var(--border));
+  --bn-colors-side-menu: hsl(var(--muted-foreground));
+}
+
+/* Phones: text lines up with the title; the block handle overlaps on hover. */
+@media (max-width: 767px) {
+  .wiki-editor .bn-editor {
+    padding-inline: 0;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family:
+      'Inter Variable',
+      Inter,
+      ui-sans-serif,
+      system-ui,
+      -apple-system,
+      BlinkMacSystemFont,
+      'Segoe UI',
+      sans-serif;
+  }
+}

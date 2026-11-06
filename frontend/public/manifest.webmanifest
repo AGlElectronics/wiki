@@ -1,0 +1,9 @@
+{
+  "name": "Wiki — Pages & knowledge",
+  "short_name": "Wiki",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#18181b",
+  "theme_color": "#18181b",
+  "icons": []
+}
