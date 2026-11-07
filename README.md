@@ -31,7 +31,7 @@ cursors and avatars, read-only for view access. On top of that:
 - **Offboarding:** HR's hook orphans the leaver's private space for the
   admins; a sweep deletes it after `WIKI_OFFBOARD_GRACE_DAYS` (30).
 
-- **Backend:** Go 1.25, chi, pgx (hand-written queries), `coder/websocket`.
+- **Backend:** Go 1.27, chi, pgx (hand-written queries), `coder/websocket`.
 - **Frontend:** React 19 + Rsbuild + TanStack Router/Query + Tailwind,
   BlockNote + Yjs.
 - **Database:** PostgreSQL 16, migrated via Goose (`cmd/migrate` one-shot).
@@ -71,9 +71,9 @@ service.
 | backend (API)  | **8140**  | 8080           |
 | frontend (SPA) | **3007**  | 80             |
 | postgres       | **5439**  | 5432           |
-| minio          | **9040**, console 9041 | 9000, 9001 |
+| s3 (SeaweedFS) | **9040**  | 9000           |
 
-Postgres and MinIO ports only apply to the standalone stack
+Postgres and S3 ports only apply to the standalone stack
 (`infra/docker-compose.yml`); in the suite the shared ones are used.
 
 ## Access model

@@ -4,8 +4,8 @@
 #   Every module in this ecosystem binds :8080 inside its container.
 #   The HOST port for Wiki is 8140 (API) and 3007 (SPA). Mapping below.
 #
-# Object storage: a local MinIO (LOCAL DEV ONLY, never production) holds
-# the `wiki-data-dev` bucket; the backend creates the bucket on start.
+# Object storage: a local SeaweedFS (service "s3"; LOCAL DEV ONLY, never
+# production) holds the `wiki-data-dev` bucket, created on start.
 #
 # Migrations: the `migrate` service is a ONE-SHOT. The backend depends on
 # it with service_completed_successfully so cmd/server never runs
@@ -15,7 +15,7 @@
 #   backend   : 8140  (container :8080)
 #   frontend  : 3007  (container :80)
 #   postgres  : 5439  (container :5432)
-#   minio     : 9040 API, 9041 console
+#   s3        : 9040 (S3 API)
 
 name: wiki
 
@@ -38,19 +38,34 @@ services:
       timeout: 5s
       retries: 10
 
-  minio:
-    image: minio/minio:latest
-    container_name: wiki-minio
+  # LOCAL DEV ONLY S3 server (SeaweedFS "mini"); DEV key wiki / wikiwikidev.
+  s3:
+    image: chrislusf/seaweedfs:4.52
+    container_name: wiki-s3
     restart: unless-stopped
-    command: server /data --console-address ":9001"
+    command:
+      - mini
+      - -dir=/data
+      - -s3.port=9000
+      - -bucket=wiki-data-dev
+      - -master.telemetry=false
+      - -admin.ui=false
+      - -webdav=false
+      - -s3.port.iceberg=0
+      - -s3.port.lance=0
     environment:
-      MINIO_ROOT_USER: wiki
-      MINIO_ROOT_PASSWORD: wikiwikidev
+      AWS_ACCESS_KEY_ID: wiki
+      AWS_SECRET_ACCESS_KEY: wikiwikidev
     ports:
       - "9040:9000"
-      - "9041:9001"
     volumes:
-      - wiki-minio-data:/data
+      - wiki-s3-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:9000/healthz && wget -q --spider http://127.0.0.1:8888/buckets/wiki-data-dev/"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
 
   # One-shot migrator. Exits zero on success; the backend waits for that.
   migrate:
@@ -79,8 +94,8 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-      minio:
-        condition: service_started
+      s3:
+        condition: service_healthy
     environment:
       APP_ENV: development
       # Browser-facing base URL uses the HOST port so links in logs /
@@ -103,7 +118,8 @@ services:
       # CORS only matters for `npm run dev` on the host — in prod the SPA
       # talks to /api via the nginx reverse proxy on the same origin.
       CORS_ALLOWED_ORIGINS: http://localhost:3007
-      S3_ENDPOINT: http://minio:9000
+      TRUSTED_PROXY_CIDRS: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128,fc00::/7"
+      S3_ENDPOINT: http://s3:9000
       S3_BUCKET: wiki-data-dev
       S3_ACCESS_KEY_ID: wiki
       S3_SECRET_ACCESS_KEY: wikiwikidev
@@ -122,20 +138,19 @@ services:
       context: ..
       dockerfile: infra/Dockerfile.frontend
       args:
-        VITE_AUTH_MODE: ${VITE_AUTH_MODE:-dev}
-        VITE_OIDC_AUTHORITY: ${VITE_OIDC_AUTHORITY:-}
-        VITE_OIDC_CLIENT_ID: ${VITE_OIDC_CLIENT_ID:-}
-        VITE_OIDC_SCOPE: ${VITE_OIDC_SCOPE:-openid profile email}
-        VITE_PRODUCT_NAME: ${VITE_PRODUCT_NAME:-Wiki}
         WIKI_VERSION: ${WIKI_VERSION:-dev}
     container_name: wiki-frontend
+    volumes:
+      # Web app settings (/config.json). Dev sign-in by default; for real
+      # sign-in set FRONTEND_CONFIG to your own file (docs: configuration).
+      - ${FRONTEND_CONFIG:-./frontend-config/compose.json}:/etc/conservices/config.json:ro
     restart: unless-stopped
     depends_on:
       - backend
     ports:
-      - "3007:80"
+      - "3007:8080"
 
 volumes:
   wiki-postgres-data:
-  wiki-minio-data:
+  wiki-s3-data:
   wiki-buffer:

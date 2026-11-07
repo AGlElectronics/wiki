@@ -1,5 +1,5 @@
 // Package files wraps an S3-compatible object storage client. In local
-// development this points at MinIO; in production it MUST point at a
+// development this points at the dev S3 server (SeaweedFS); in production it MUST point at a
 // managed S3-compatible bucket.
 //
 // The adapter is deliberately provider-neutral; feature code never imports

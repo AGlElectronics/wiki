@@ -4,10 +4,11 @@
 // too. The auth-headers resolver is injected at startup from
 // src/auth/installAuth.ts.
 
-const API_BASE_URL =
+import { runtimeConfig } from '@/runtime-config';
+
+const apiBaseUrl = () =>
   (typeof process !== 'undefined' ? process.env.WIKI_API_BASE_URL : undefined) ??
-  (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
-  '';
+  runtimeConfig().apiBaseUrl;
 
 export type ApiErrorBody = {
   error: {
@@ -56,7 +57,7 @@ type RequestOpts = {
 /** Absolute URL of an API path (the API may live on another origin in dev). */
 export function apiURL(path: string): URL {
   return new URL(
-    path.startsWith('http') ? path : `${API_BASE_URL}${path}`,
+    path.startsWith('http') ? path : `${apiBaseUrl()}${path}`,
     typeof window !== 'undefined' ? window.location.origin : 'http://localhost'
   );
 }

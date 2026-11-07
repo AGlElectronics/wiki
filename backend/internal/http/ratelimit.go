@@ -1,11 +1,11 @@
 package http
 
 import (
-	"net"
 	"net/http"
 	"sync"
 	"time"
 
+	"github.com/AGlElectronics/wiki/backend/internal/clientip"
 	"github.com/AGlElectronics/wiki/backend/internal/httperror"
 )
 
@@ -59,14 +59,11 @@ func (l *rateLimiter) allow(key string) bool {
 	return true
 }
 
-// middleware limits by client IP (RealIP has normalized RemoteAddr).
+// middleware limits by client IP as resolved by clientip.Middleware, which
+// only believes X-Forwarded-For from trusted proxies.
 func (l *rateLimiter) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil {
-			ip = r.RemoteAddr
-		}
-		if !l.allow(ip) {
+		if !l.allow(clientip.FromRequest(r)) {
 			w.Header().Set("Retry-After", "60")
 			httperror.Render(w, r, httperror.New(httperror.CodeTooManyRequests, "too many requests; try again shortly"))
 			return
