@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import { Link, Outlet, useRouterState } from '@tanstack/react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, ChevronRight, House, LogOut, Menu, Plus, Search, Settings, X } from 'lucide-react';
 import { atLeast, listFavorites, listSpaces, type Space } from '@/api/wiki';
 import { isOidcAuthMode, signOutOidc } from '@/auth/oidc';
 import { dropTarget, PageTree, useCreatePage, useExpanded, useMovePage } from '@/components/PageTree';
 import { SearchPalette } from '@/components/SearchPalette';
 import { SpaceDialog } from '@/components/SpaceDialog';
+import { DenConnection } from '@/components/DenConnection';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { useBrand } from '@/brand/BrandProvider';
+import { isDenPairingRequired, useDenState } from '@/hooks/useDenState';
 import { useMe, PERMS } from '@/hooks/useMe';
 import { useThemeSync } from '@/lib/theme';
 import { cn } from '@/lib/utils';
@@ -238,8 +240,57 @@ function WikiNav({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
+/** Shown instead of the app while the backend runs with DEN_MODE=required and is not paired. */
+function DenPairingGate({ canManage }: { canManage: boolean }) {
+  const qc = useQueryClient();
+  return (
+    <div className="min-h-screen grid place-items-center bg-background text-foreground p-6">
+      <div className="max-w-xl w-full rounded-2xl border border-border bg-card p-6 space-y-4">
+        <div className="flex justify-center">
+          <Wordmark />
+        </div>
+        {canManage ? (
+          <>
+            <h1 className="font-heading text-lg font-bold text-center">Connect this module to Den</h1>
+            <ol className="list-decimal space-y-1 pl-5 text-sm">
+              <li>In Den, open Modules and click Pair next to Wiki</li>
+              <li>Copy the pairing URL (valid 15 minutes)</li>
+              <li>Paste it below</li>
+            </ol>
+            <DenConnection base="/api/v1/den" onPaired={() => void qc.invalidateQueries()} />
+          </>
+        ) : (
+          <div className="space-y-1 text-center">
+            <h1 className="font-heading text-lg font-bold">Waiting for Den</h1>
+            <p className="text-sm text-muted-foreground">
+              This module is waiting to be connected to Den. Ask an administrator to pair it.
+            </p>
+          </div>
+        )}
+        <div className="flex justify-center gap-2">
+          <ThemeToggle className="rounded-pill" />
+          {isOidcAuthMode() ? (
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-pill text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+              onClick={() => {
+                signOutOidc().catch(() => undefined);
+              }}
+            >
+              <LogOut className="w-4 h-4 shrink-0" />
+              Sign out
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Layout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { me, can } = useMe();
+  const denState = useDenState();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [searching, setSearching] = useState(false);
   useThemeSync('/api/v1/me/preferences');
@@ -260,6 +311,10 @@ export function Layout() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  if (me && isDenPairingRequired(denState.data)) {
+    return <DenPairingGate canManage={can(PERMS.settingsManage)} />;
+  }
 
   const footer = (
     <div className="mt-auto p-2 border-t border-border space-y-0.5">
