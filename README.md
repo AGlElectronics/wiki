@@ -1,5 +1,11 @@
 # Wiki
 
+> [!WARNING]
+> ## **NOT READY FOR PRODUCTION**
+>
+> Con Services is under active development. Expect breaking changes, missing
+> features and bugs. Do not use it for real events or real data yet.
+
 Knowledge base module for the Con Services stack: Notion-style pages
 nested in spaces, shared per space or per page. The plan, including live
 editing and how page content is stored in S3, is in
