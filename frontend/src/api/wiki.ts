@@ -382,5 +382,14 @@ export const removeFavorite = (pageId: string) =>
 export const searchPeople = (q: string, signal?: AbortSignal) =>
   apiRequest<{ people: Person[] }>('/api/v1/users', { signal, query: { q } }).then((r) => r.people);
 
-export const listGroups = (signal?: AbortSignal) =>
-  apiRequest<{ groups: string[] }>('/api/v1/groups', { signal }).then((r) => r.groups);
+/** department and access come from HR, idp from the sign-in server, token from the caller's own groups. */
+export type DirectoryGroup = { name: string; display_name: string; kind: 'department' | 'access' | 'idp' | 'token' };
+
+export type GroupList = {
+  groups: DirectoryGroup[];
+  source: 'hr' | 'idp' | 'token';
+  /** Set when the directory failed and the list fell back to the caller's groups. */
+  warning?: string;
+};
+
+export const listGroups = (signal?: AbortSignal) => apiRequest<GroupList>('/api/v1/groups', { signal });

@@ -41,6 +41,15 @@ counts rebuilds of the same version. Rebuilds get no entry here.
 - The web app shows a "Connect this module to Den" page (admins) or
   "Waiting for Den" (everyone else) while the backend runs with
   `DEN_MODE=required` and is not paired yet.
+- The share dialog's group picker lists real groups: HR's departments and
+  access groups while Wiki is paired with Den (`HR_DIRECTORY_URL`,
+  `HR_DIRECTORY_TOKEN`; HR must provide `GET /api/internal/directory/groups`),
+  otherwise the groups in the sign-in server (`IDP_DIRECTORY_URL`,
+  `IDP_DIRECTORY_REALM`, `IDP_DIRECTORY_CLIENT_ID`,
+  `IDP_DIRECTORY_CLIENT_SECRET`), otherwise the person's own groups. Any
+  group name can still be typed in. `GET /api/v1/groups` now returns
+  `{"groups":[{"name","display_name","kind"}],"source"}`. See
+  [Configuration](https://aglelectronics.github.io/con-services/modules/wiki/configuration/#group-picker).
 - `TRUSTED_PROXY_CIDRS` (optional): comma-separated CIDRs of the proxies in
   front of the backend whose `X-Forwarded-For` entries are believed. The
   default, `10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128,fc00::/7`,
@@ -101,3 +110,6 @@ counts rebuilds of the same version. Rebuilds get no entry here.
   HTML and every other file download as an attachment. Every download,
   including through public share links, carries
   `Content-Security-Policy: sandbox` and `X-Content-Type-Options: nosniff`.
+- The people picker shows email addresses only to wiki admins, and only
+  they can search people by email; everyone else sees names. The group
+  picker no longer lists every group seen on anyone's sign-in.

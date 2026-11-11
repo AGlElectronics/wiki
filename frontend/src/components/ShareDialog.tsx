@@ -14,6 +14,7 @@ import {
   setRestricted,
   setSpaceGrant,
   updateSpace,
+  type DirectoryGroup,
   type Grant,
   type GrantInput,
   type GrantLevel,
@@ -326,10 +327,12 @@ function AddGrant({
     picked || !q
       ? []
       : kind === 'user'
-        ? (people.data ?? []).map((p) => ({ id: p.id, label: p.display_name, hint: p.email }))
-        : (groups.data ?? []).filter((g) => g.toLowerCase().includes(q)).map((g) => ({ id: g, label: g, hint: '' }));
+        ? (people.data ?? []).map((p) => ({ id: p.id, label: p.display_name, hint: p.email ?? '' }))
+        : (groups.data?.groups ?? [])
+            .filter((g) => g.name.toLowerCase().includes(q) || g.display_name.toLowerCase().includes(q))
+            .map((g) => ({ id: g.name, label: g.display_name, hint: groupHint(g) }));
 
-  // Groups can be typed in before anyone in them has signed in.
+  // Any group name can be typed in, also one the directory does not list.
   const principal = picked?.id ?? (kind === 'group' ? query.trim() : '');
 
   const reset = () => {
@@ -383,7 +386,7 @@ function AddGrant({
                   key={s.id}
                   type="button"
                   className="w-full text-left px-3 py-2 text-sm hover:bg-secondary"
-                  onClick={() => setPicked({ id: s.id, label: s.label })}
+                  onClick={() => setPicked({ id: s.id, label: kind === 'group' ? s.id : s.label })}
                 >
                   {s.label}
                   {s.hint ? <span className="block text-xs text-muted-foreground">{s.hint}</span> : null}
@@ -403,6 +406,21 @@ function AddGrant({
           Invite
         </Button>
       </div>
+      {kind === 'group' && groups.data?.warning ? (
+        <p className="text-xs text-warning">{groups.data.warning}</p>
+      ) : null}
     </form>
   );
+}
+
+const GROUP_KIND_LABELS: Record<DirectoryGroup['kind'], string> = {
+  department: 'Department',
+  access: 'Access group',
+  idp: 'Sign-in group',
+  token: 'Your group',
+};
+
+function groupHint(g: DirectoryGroup) {
+  const kind = GROUP_KIND_LABELS[g.kind] ?? '';
+  return g.display_name === g.name ? kind : `${kind} · ${g.name}`;
 }

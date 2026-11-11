@@ -39,7 +39,8 @@
 //	GET /api/public/v1/shares/{token}[/pages/{page}/doc|/files/{file}] — no account,
 //	rate limited; 404 unless wiki_public_links (Den) or PUBLIC_LINKS_ENABLED is on
 //	POST /api/internal/offboarded — HR's hook (WIKI_SERVICE_TOKEN; 404 without one)
-//	GET /api/v1/users?q=, GET /api/v1/groups — share dialog pickers
+//	GET /api/v1/users?q=, GET /api/v1/groups — share dialog pickers (emails for
+//	wiki admins only; groups from HR, the IdP directory or the caller's token)
 //	/api/v1/den…           — Den pairing admin (settings.manage)
 //
 // Everything under /api/v1 (except /brand) requires authentication; the
@@ -65,6 +66,7 @@ import (
 	"github.com/AGlElectronics/wiki/backend/internal/clientip"
 	"github.com/AGlElectronics/wiki/backend/internal/config"
 	"github.com/AGlElectronics/wiki/backend/internal/denlink"
+	"github.com/AGlElectronics/wiki/backend/internal/directory"
 	"github.com/AGlElectronics/wiki/backend/internal/domain"
 	"github.com/AGlElectronics/wiki/backend/internal/live"
 	"github.com/AGlElectronics/wiki/backend/internal/wiki"
@@ -86,6 +88,26 @@ type Deps struct {
 	Live *live.Manager
 	// Files is uploads; nil (no object storage) turns them off.
 	Files *wiki.Files
+	// HRGroups and IdPGroups feed the share dialog's group picker; nil
+	// builds them from Config (HR_DIRECTORY_URL, IDP_DIRECTORY_URL).
+	HRGroups  directory.Source
+	IdPGroups directory.Source
+}
+
+// directoryTTL is how long the group picker caches a directory's answer.
+const directoryTTL = 5 * time.Minute
+
+func groupSources(deps Deps) (hr, idp directory.Source) {
+	hr, idp = deps.HRGroups, deps.IdPGroups
+	cfg := deps.Config
+	if hr == nil && cfg.HRDirectoryURL != "" {
+		hr = directory.NewCached(directory.NewHR(cfg.HRDirectoryURL, cfg.HRDirectoryToken), directoryTTL)
+	}
+	if idp == nil && cfg.IdPDirectoryURL != "" {
+		idp = directory.NewCached(directory.NewKeycloak(cfg.IdPDirectoryURL, cfg.IdPDirectoryRealm,
+			cfg.IdPDirectoryClientID, cfg.IdPDirectoryClientSecret), directoryTTL)
+	}
+	return hr, idp
 }
 
 // timeoutExceptLive bounds request time, except for live editing
@@ -147,7 +169,8 @@ func NewRouter(deps Deps, version string) http.Handler {
 	if svc == nil {
 		svc = wiki.NewService(deps.Pool)
 	}
-	wh := &wikiHandler{svc: svc, live: deps.Live, files: deps.Files}
+	hrGroups, idpGroups := groupSources(deps)
+	wh := &wikiHandler{svc: svc, live: deps.Live, files: deps.Files, den: den, hrGroups: hrGroups, idpGroups: idpGroups}
 
 	// Orchestrator probes — unauthenticated, served from the root so they
 	// don't collide with any /api/* middleware.

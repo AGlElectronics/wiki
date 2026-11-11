@@ -94,6 +94,16 @@ type Config struct {
 	// OffboardGraceDays is how long an offboarded person's private space
 	// stays (visible to wiki admins) before the sweep deletes it.
 	OffboardGraceDays int
+
+	// Group picker directories (package directory). HR is used while the
+	// module is paired with Den; the identity provider otherwise. Empty
+	// URLs turn a source off.
+	HRDirectoryURL           string
+	HRDirectoryToken         string
+	IdPDirectoryURL          string
+	IdPDirectoryRealm        string
+	IdPDirectoryClientID     string
+	IdPDirectoryClientSecret string
 }
 
 // S3Enabled reports whether object storage is configured.
@@ -144,6 +154,13 @@ func Load() (*Config, error) {
 
 		ServiceToken:      getEnv("WIKI_SERVICE_TOKEN", ""),
 		OffboardGraceDays: getEnvInt("WIKI_OFFBOARD_GRACE_DAYS", 30),
+
+		HRDirectoryURL:           getEnv("HR_DIRECTORY_URL", ""),
+		HRDirectoryToken:         getEnv("HR_DIRECTORY_TOKEN", ""),
+		IdPDirectoryURL:          getEnv("IDP_DIRECTORY_URL", ""),
+		IdPDirectoryRealm:        getEnv("IDP_DIRECTORY_REALM", "conservices"),
+		IdPDirectoryClientID:     getEnv("IDP_DIRECTORY_CLIENT_ID", ""),
+		IdPDirectoryClientSecret: getEnv("IDP_DIRECTORY_CLIENT_SECRET", ""),
 	}
 
 	trusted, err := clientip.ParseCIDRs(getEnv("TRUSTED_PROXY_CIDRS", clientip.DefaultTrustedProxies))
@@ -166,6 +183,12 @@ func (c *Config) validate() error {
 	}
 	if err := c.DenMode.Validate(); err != nil {
 		errs = append(errs, err.Error())
+	}
+	if c.HRDirectoryURL != "" && c.HRDirectoryToken == "" {
+		errs = append(errs, "HR_DIRECTORY_TOKEN is required when HR_DIRECTORY_URL is set")
+	}
+	if c.IdPDirectoryURL != "" && (c.IdPDirectoryClientID == "" || c.IdPDirectoryClientSecret == "") {
+		errs = append(errs, "IDP_DIRECTORY_CLIENT_ID and IDP_DIRECTORY_CLIENT_SECRET are required when IDP_DIRECTORY_URL is set")
 	}
 
 	switch c.AuthMode {

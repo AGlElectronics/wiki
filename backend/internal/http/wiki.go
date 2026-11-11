@@ -9,8 +9,11 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/hlog"
 
 	"github.com/AGlElectronics/wiki/backend/internal/auth"
+	"github.com/AGlElectronics/wiki/backend/internal/denlink"
+	"github.com/AGlElectronics/wiki/backend/internal/directory"
 	"github.com/AGlElectronics/wiki/backend/internal/domain"
 	"github.com/AGlElectronics/wiki/backend/internal/httperror"
 	"github.com/AGlElectronics/wiki/backend/internal/live"
@@ -23,6 +26,10 @@ type wikiHandler struct {
 	svc   *wiki.Service
 	live  *live.Manager
 	files *wiki.Files
+	den   *denlink.Client
+	// Group picker directories; nil turns one off.
+	hrGroups  directory.Source
+	idpGroups directory.Source
 
 	orgMu sync.Mutex
 	orgID uuid.UUID
@@ -724,7 +731,7 @@ func (h *wikiHandler) removeFavorite(r *http.Request, c wiki.Caller) (int, any, 
 // Share dialog pickers
 // ----------------------------------------------------------------------------
 
-func (h *wikiHandler) people(r *http.Request, _ wiki.Caller) (int, any, error) {
+func (h *wikiHandler) people(r *http.Request, c wiki.Caller) (int, any, error) {
 	// ?ids= looks up specific people (comment authors); ?q= searches.
 	if raw := r.URL.Query().Get("ids"); raw != "" {
 		var ids []uuid.UUID
@@ -735,14 +742,40 @@ func (h *wikiHandler) people(r *http.Request, _ wiki.Caller) (int, any, error) {
 			}
 			ids = append(ids, id)
 		}
-		people, err := h.svc.PeopleByIDs(r.Context(), ids)
+		people, err := h.svc.PeopleByIDs(r.Context(), c, ids)
 		return ok(map[string]any{"people": people}, err)
 	}
-	people, err := h.svc.ListPeople(r.Context(), r.URL.Query().Get("q"))
+	people, err := h.svc.ListPeople(r.Context(), c, r.URL.Query().Get("q"))
 	return ok(map[string]any{"people": people}, err)
 }
 
-func (h *wikiHandler) groups(r *http.Request, _ wiki.Caller) (int, any, error) {
-	groups, err := h.svc.ListGroups(r.Context())
-	return ok(map[string]any{"groups": groups}, err)
+// groupSource picks the group picker's directory: HR while paired with
+// Den, else the identity provider, else none (the caller's own groups).
+func (h *wikiHandler) groupSource() (directory.Source, string) {
+	switch {
+	case h.hrGroups != nil && h.den != nil && h.den.Paired():
+		return h.hrGroups, "hr"
+	case h.idpGroups != nil:
+		return h.idpGroups, "idp"
+	}
+	return nil, "token"
+}
+
+// groups lists groups for the share dialog. Any group name can still be
+// typed in; this only helps picking. A failing directory falls back to the
+// caller's own groups with a warning.
+func (h *wikiHandler) groups(r *http.Request, c wiki.Caller) (int, any, error) {
+	src, name := h.groupSource()
+	if src != nil {
+		groups, err := src.Groups(r.Context())
+		if err == nil {
+			return ok(map[string]any{"groups": groups, "source": name}, nil)
+		}
+		hlog.FromRequest(r).Warn().Err(err).Str("source", name).Msg("group directory unavailable; offering the caller's groups")
+		return ok(map[string]any{
+			"groups": directory.FromToken(c.Groups), "source": "token",
+			"warning": "The group directory is unavailable; showing your own groups. You can still type any group name.",
+		}, nil)
+	}
+	return ok(map[string]any{"groups": directory.FromToken(c.Groups), "source": "token"}, nil)
 }

@@ -352,50 +352,46 @@ func (s *Service) SetSpaceGrant(ctx context.Context, c Caller, id uuid.UUID, in 
 	return spaceView(sp, c), nil
 }
 
-// Person is a users row projected for the share dialog.
+// Person is a users row projected for the share dialog. Email is only
+// filled in for wiki admins.
 type Person struct {
 	ID          uuid.UUID `json:"id"`
 	DisplayName string    `json:"display_name"`
 	Email       string    `json:"email,omitempty"`
 }
 
-// ListPeople returns people who have signed in to the wiki, filtered by
-// name or email.
-func (s *Service) ListPeople(ctx context.Context, query string) ([]Person, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, display_name, COALESCE(email, '') FROM users
-		 WHERE issuer <> '' AND ($1 = '' OR display_name ILIKE '%' || $1 || '%' OR email ILIKE '%' || $1 || '%')
-		 ORDER BY display_name LIMIT 50`, strings.TrimSpace(query))
-	if err != nil {
-		return nil, err
-	}
+func collectPeople(rows pgx.Rows, withEmail bool) ([]Person, error) {
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (Person, error) {
 		var p Person
 		err := r.Scan(&p.ID, &p.DisplayName, &p.Email)
+		if !withEmail {
+			p.Email = ""
+		}
 		return p, err
 	})
 }
 
-// PeopleByIDs returns the given users, for showing comment authors.
-func (s *Service) PeopleByIDs(ctx context.Context, ids []uuid.UUID) ([]Person, error) {
+// ListPeople returns people who have signed in to the wiki, filtered by
+// name. Wiki admins also see and search by email addresses; everyone else
+// gets names only, so the picker cannot be used to harvest addresses.
+func (s *Service) ListPeople(ctx context.Context, c Caller, query string) ([]Person, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, display_name, COALESCE(email, '') FROM users
+		 WHERE issuer <> '' AND ($1 = '' OR display_name ILIKE '%' || $1 || '%' OR ($2 AND email ILIKE '%' || $1 || '%'))
+		 ORDER BY display_name LIMIT 50`, strings.TrimSpace(query), c.Admin)
+	if err != nil {
+		return nil, err
+	}
+	return collectPeople(rows, c.Admin)
+}
+
+// PeopleByIDs returns the given users, for showing comment authors. Email
+// addresses as in ListPeople.
+func (s *Service) PeopleByIDs(ctx context.Context, c Caller, ids []uuid.UUID) ([]Person, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, display_name, COALESCE(email, '') FROM users WHERE id = ANY($1) LIMIT 100`, ids)
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (Person, error) {
-		var p Person
-		err := r.Scan(&p.ID, &p.DisplayName, &p.Email)
-		return p, err
-	})
-}
-
-// ListGroups returns the IdP groups seen on people's tokens, for the
-// share dialog's group picker.
-func (s *Service) ListGroups(ctx context.Context) ([]string, error) {
-	rows, err := s.pool.Query(ctx, `SELECT DISTINCT unnest(groups) AS g FROM users ORDER BY g`)
-	if err != nil {
-		return nil, err
-	}
-	return pgx.CollectRows(rows, pgx.RowTo[string])
+	return collectPeople(rows, c.Admin)
 }

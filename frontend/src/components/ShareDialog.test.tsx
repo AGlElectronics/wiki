@@ -2,8 +2,8 @@
 // explains itself, and the public-link section only appears with full
 // access and keeps the token visible exactly once.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen } from '@testing-library/react';
-import { vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, vi } from 'vitest';
 import type { Page } from '@/api/wiki';
 import { ShareDialog } from '@/components/ShareDialog';
 
@@ -33,9 +33,20 @@ vi.mock('@/api/wiki', async (importOriginal) => {
       token: 'wsl_test_token',
     }),
     revokeShareLink: vi.fn().mockResolvedValue(undefined),
-    searchPeople: vi.fn().mockResolvedValue([]),
-    listGroups: vi.fn().mockResolvedValue([]),
+    searchPeople: vi.fn().mockResolvedValue([{ id: 'u-1', display_name: 'Eddie' }]),
+    listGroups: vi.fn().mockResolvedValue({
+      source: 'hr',
+      groups: [
+        { name: 'dept-security', display_name: 'Security', kind: 'department' },
+        { name: 'wiki-editor', display_name: 'Wiki editors', kind: 'access' },
+      ],
+    }),
+    setPageGrant: vi.fn().mockResolvedValue({ access: 'full' }),
   };
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
 });
 
 function page(overrides: Partial<Page> = {}): Page {
@@ -88,6 +99,45 @@ test('full access offers public links and shows the token once', async () => {
   fireEvent.click(screen.getByRole('button', { name: /create link/i }));
   const url = await screen.findByLabelText<HTMLInputElement>('Share URL');
   expect(url.value).toContain('/share/wsl_test_token');
+});
+
+test('the group picker offers HR departments and stores the group name', async () => {
+  const { setPageGrant } = await import('@/api/wiki');
+  renderDialog(page());
+  fireEvent.click(screen.getByRole('button', { name: 'Group' }));
+  fireEvent.change(screen.getByPlaceholderText(/group name/i), { target: { value: 'secu' } });
+  const option = await screen.findByRole('button', { name: /Security.*Department · dept-security/ });
+  fireEvent.click(option);
+  fireEvent.click(screen.getByRole('button', { name: 'Invite' }));
+  await waitFor(() =>
+    expect(setPageGrant).toHaveBeenCalledWith('page-1', {
+      principal_kind: 'group',
+      principal: 'dept-security',
+      level: 'view',
+    })
+  );
+});
+
+test('a group the directory does not list can still be typed in', async () => {
+  const { setPageGrant } = await import('@/api/wiki');
+  renderDialog(page());
+  fireEvent.click(screen.getByRole('button', { name: 'Group' }));
+  fireEvent.change(screen.getByPlaceholderText(/group name/i), { target: { value: 'crew-night' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Invite' }));
+  await waitFor(() =>
+    expect(setPageGrant).toHaveBeenCalledWith('page-1', {
+      principal_kind: 'group',
+      principal: 'crew-night',
+      level: 'view',
+    })
+  );
+});
+
+test('people without a visible email show just the name', async () => {
+  renderDialog(page());
+  fireEvent.change(screen.getByPlaceholderText(/search people/i), { target: { value: 'edd' } });
+  const option = await screen.findByRole('button', { name: 'Eddie' });
+  expect(option.querySelector('span')).toBeNull();
 });
 
 test('edit access gets no public-link section', () => {
