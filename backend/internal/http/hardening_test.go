@@ -37,6 +37,17 @@ func TestSecurityHeadersAndCORS(t *testing.T) {
 		}
 	}
 
+	// The web app may read X-Request-ID cross-origin (error reports).
+	req := httptest.NewRequest("GET", "/api/v1/me", nil)
+	req.Header.Set("Origin", "https://wiki.example.org")
+	req.Header.Set("X-Dev-User", editor.user)
+	req.Header.Set("X-Dev-Groups", editor.groups)
+	cors := httptest.NewRecorder()
+	h.ServeHTTP(cors, req)
+	if got := cors.Header().Get("Access-Control-Expose-Headers"); got != "X-Request-ID" || cors.Header().Get("X-Request-ID") == "" {
+		t.Errorf("Access-Control-Expose-Headers = %q, X-Request-ID = %q", got, cors.Header().Get("X-Request-ID"))
+	}
+
 	preflight := func(h nethttp.Handler) string {
 		req := httptest.NewRequest("OPTIONS", "/api/v1/spaces", nil)
 		req.Header.Set("Origin", "https://wiki.example.org")

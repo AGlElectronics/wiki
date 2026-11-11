@@ -63,7 +63,6 @@ import (
 	"github.com/AGlElectronics/wiki/backend/internal/auth"
 	"github.com/AGlElectronics/wiki/backend/internal/authbase"
 	"github.com/AGlElectronics/wiki/backend/internal/brand"
-	"github.com/AGlElectronics/wiki/backend/internal/clientip"
 	"github.com/AGlElectronics/wiki/backend/internal/config"
 	"github.com/AGlElectronics/wiki/backend/internal/denlink"
 	"github.com/AGlElectronics/wiki/backend/internal/directory"
@@ -140,9 +139,12 @@ func timeoutExceptLive(d time.Duration) func(http.Handler) http.Handler {
 // Version is passed in from cmd/server at build time.
 func NewRouter(deps Deps, version string) http.Handler {
 	r := chi.NewRouter()
+	authCfg := deps.Config.Auth()
 
 	r.Use(chimiddleware.RequestID)
-	r.Use(clientip.Middleware(deps.Config.TrustedProxyCIDRs))
+	// RemoteAddr becomes the real client behind TRUSTED_PROXY_CIDRS, before
+	// the request log and every rate limiter.
+	r.Use(authCfg.TrustedProxies.Middleware)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(timeoutExceptLive(60 * time.Second))
 
@@ -160,11 +162,14 @@ func NewRouter(deps Deps, version string) http.Handler {
 
 	// Shared hardening (authbase): API security headers on every response,
 	// dev identity headers removed unless AUTH_MODE=dev in development, and
-	// CORS that only lets dev headers through in dev mode.
-	authCfg := deps.Config.Auth()
+	// CORS that only lets dev headers through in dev mode and lets the web
+	// app read X-Request-ID.
 	r.Use(authbase.SecurityHeaders)
 	r.Use(authCfg.StripDevHeaders)
-	r.Use(authCfg.CORS(authbase.CORSOptions{AllowedOrigins: deps.Config.CORSAllowedOrigins}))
+	r.Use(authCfg.CORS(authbase.CORSOptions{
+		AllowedOrigins: deps.Config.CORSAllowedOrigins,
+		ExposeHeaders:  authbase.DefaultExposeHeaders,
+	}))
 
 	health := newHealthHandler(deps.Pool, version)
 	resolver := auth.NewResolver(deps.Pool, deps.Access, deps.Config.GroupMatch)

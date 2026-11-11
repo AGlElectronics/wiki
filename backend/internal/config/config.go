@@ -11,8 +11,6 @@ package config
 
 import (
 	"errors"
-	"fmt"
-	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -21,7 +19,6 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/AGlElectronics/wiki/backend/internal/authbase"
-	"github.com/AGlElectronics/wiki/backend/internal/clientip"
 	"github.com/AGlElectronics/wiki/backend/internal/denlink"
 	"github.com/AGlElectronics/wiki/backend/internal/groupmatch"
 )
@@ -75,10 +72,11 @@ type Config struct {
 
 	// HTTP
 	CORSAllowedOrigins []string
-	// TrustedProxyCIDRs lists the proxies whose X-Forwarded-For entries are
-	// believed when working out the client IP (TRUSTED_PROXY_CIDRS).
-	TrustedProxyCIDRs []netip.Prefix
-	ShutdownTimeout   time.Duration
+	// TrustedProxies are the proxies whose X-Forwarded-For entries are
+	// believed when working out the client IP (TRUSTED_PROXY_CIDRS). The
+	// zero value trusts none.
+	TrustedProxies  authbase.TrustedProxies
+	ShutdownTimeout time.Duration
 
 	// Object storage (S3-compatible; SeaweedFS in dev). Empty S3Endpoint
 	// disables it.
@@ -123,9 +121,9 @@ type Config struct {
 // S3Enabled reports whether object storage is configured.
 func (c *Config) S3Enabled() bool { return strings.TrimSpace(c.S3Endpoint) != "" }
 
-// Auth is the authbase view of AUTH_MODE and APP_ENV.
+// Auth is the authbase view of AUTH_MODE, APP_ENV and TRUSTED_PROXY_CIDRS.
 func (c *Config) Auth() authbase.Config {
-	return authbase.Config{AppEnv: c.AppEnv, AuthMode: c.AuthMode}
+	return authbase.Config{AppEnv: c.AppEnv, AuthMode: c.AuthMode, TrustedProxies: c.TrustedProxies}
 }
 
 // Audience is the audience access tokens must carry.
@@ -192,6 +190,7 @@ func Load() (*Config, error) {
 		Den:            den,
 
 		CORSAllowedOrigins: splitCSV(getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3007")),
+		TrustedProxies:     auth.TrustedProxies,
 		ShutdownTimeout:    getEnvDuration("SHUTDOWN_TIMEOUT", 15*time.Second),
 
 		S3Endpoint:        getEnv("S3_ENDPOINT", ""),
@@ -217,12 +216,6 @@ func Load() (*Config, error) {
 		IdPDirectoryClientID:     getEnv("IDP_DIRECTORY_CLIENT_ID", ""),
 		IdPDirectoryClientSecret: getEnv("IDP_DIRECTORY_CLIENT_SECRET", ""),
 	}
-
-	trusted, err := clientip.ParseCIDRs(getEnv("TRUSTED_PROXY_CIDRS", clientip.DefaultTrustedProxies))
-	if err != nil {
-		return nil, fmt.Errorf("invalid config: TRUSTED_PROXY_CIDRS: %w", err)
-	}
-	cfg.TrustedProxyCIDRs = trusted
 
 	if err := cfg.validate(errs); err != nil {
 		return nil, err

@@ -12,6 +12,8 @@ import (
 	"net/http"
 
 	"github.com/rs/zerolog/log"
+
+	"github.com/AGlElectronics/wiki/backend/internal/authbase"
 )
 
 // Code is a stable string returned to API clients. Add codes sparingly —
@@ -19,18 +21,20 @@ import (
 type Code string
 
 const (
-	CodeBadRequest      Code = "bad_request"
-	CodeValidation      Code = "validation_failed"
-	CodeUnauthorized    Code = "unauthorized"
-	CodeForbidden       Code = "forbidden"
-	CodeNotFound        Code = "not_found"
-	CodeConflict        Code = "conflict"
-	CodeInternal        Code = "internal"
-	CodeUnavailable     Code = "unavailable"
-	CodeTooManyRequests Code = "too_many_requests"
-	// CodeTooLarge and CodeUnsupportedMedia match authbase.DecodeJSON.
-	CodeTooLarge         Code = "request_too_large"
-	CodeUnsupportedMedia Code = "unsupported_media_type"
+	CodeValidation   Code = "validation_failed"
+	CodeUnauthorized Code = "unauthorized"
+	CodeForbidden    Code = "forbidden"
+	CodeNotFound     Code = "not_found"
+	CodeConflict     Code = "conflict"
+	CodeInternal     Code = "internal"
+	CodeUnavailable  Code = "unavailable"
+
+	// The shared codes (authbase), returned unchanged: the body decoder and
+	// the rate limiter write them, and the web app may switch on them.
+	CodeBadRequest       Code = authbase.CodeBadRequest
+	CodeTooLarge         Code = authbase.CodeRequestTooLarge
+	CodeUnsupportedMedia Code = authbase.CodeUnsupportedMediaType
+	CodeRateLimited      Code = authbase.CodeRateLimited
 )
 
 // Error is the canonical service error. Services return *Error or wrap one
@@ -153,7 +157,7 @@ func statusFor(code Code) int {
 		return http.StatusConflict
 	case CodeUnavailable:
 		return http.StatusServiceUnavailable
-	case CodeTooManyRequests:
+	case CodeRateLimited:
 		return http.StatusTooManyRequests
 	case CodeTooLarge:
 		return http.StatusRequestEntityTooLarge

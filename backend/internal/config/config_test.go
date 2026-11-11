@@ -94,6 +94,36 @@ func TestSafeDefaults(t *testing.T) {
 			t.Fatalf("want the DEN_LINK_ENCRYPTION_KEY refusal, got %v", err)
 		}
 	})
+	t.Run("trusted proxies", func(t *testing.T) {
+		for _, tc := range []struct {
+			value, want string
+			n           int
+		}{
+			{"", "", 6}, // the private and loopback ranges
+			{"none", "", 0},
+			{"203.0.113.0/24, 2001:db8::/32", "", 2},
+			{"203.0.113.9", "", 1},
+			{"10.0.0.0/8,example.com", "TRUSTED_PROXY_CIDRS", 0},
+		} {
+			clear(t)
+			t.Setenv("APP_ENV", "development")
+			t.Setenv("AUTH_MODE", "dev")
+			t.Setenv("TRUSTED_PROXY_CIDRS", tc.value)
+			cfg, err := Load()
+			if tc.want != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("%q: want an error containing %q, got %v", tc.value, tc.want, err)
+				}
+				continue
+			}
+			if err != nil {
+				t.Fatalf("%q: %v", tc.value, err)
+			}
+			if len(cfg.TrustedProxies) != tc.n || len(cfg.Auth().TrustedProxies) != tc.n {
+				t.Fatalf("%q: trusted proxies %v, want %d", tc.value, cfg.TrustedProxies, tc.n)
+			}
+		}
+	})
 	t.Run("bad group match", func(t *testing.T) {
 		clear(t)
 		t.Setenv("APP_ENV", "development")
