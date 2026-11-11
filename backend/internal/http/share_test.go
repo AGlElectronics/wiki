@@ -110,6 +110,14 @@ func TestShareLinks(t *testing.T) {
 	if rec.Body.String() != "png-bytes" {
 		t.Fatalf("shared file bytes = %q", rec.Body.String())
 	}
+	// "png-bytes" is not a PNG, so it was stored as plain bytes and
+	// downloads as a sandboxed attachment.
+	if cd := rec.Header().Get("Content-Disposition"); cd != `attachment; filename="map.png"` {
+		t.Fatalf("shared file content disposition = %q", cd)
+	}
+	if rec.Header().Get("Content-Security-Policy") != "sandbox" || rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("shared file misses the sandbox CSP or nosniff: %v", rec.Header())
+	}
 	rec, _ = anonGet(t, h, "/api/public/v1/shares/"+token+"/files/"+secretFile)
 	mustStatus(t, rec.Code, 404, "out-of-scope file")
 

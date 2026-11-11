@@ -87,3 +87,10 @@ counts rebuilds of the same version. Rebuilds get no entry here.
   scan (Trivy, HIGH and CRITICAL issues that have a fix).
 - A production build never falls back to dev sign-in: a `/config.json`
   without `authMode` means OIDC.
+- Uploaded files cannot run script on the wiki's address. Only PNG, JPEG,
+  GIF and WebP images open in the browser, and only when their bytes really
+  are that format (the backend checks them at upload; a file that only
+  claims to be an image is stored as `application/octet-stream`). SVG,
+  HTML and every other file download as an attachment. Every download,
+  including through public share links, carries
+  `Content-Security-Policy: sandbox` and `X-Content-Type-Options: nosniff`.

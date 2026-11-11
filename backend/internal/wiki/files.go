@@ -1,10 +1,13 @@
 package wiki
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"mime"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
@@ -21,6 +24,40 @@ const (
 	MaxImageBytes = int64(25) << 20
 	MaxFileBytes  = int64(50) << 20
 )
+
+// inlineTypes are the raster image types a download shows in the browser.
+// Everything else, SVG and HTML included, downloads as an attachment: opened
+// on the wiki's own address, such a file could run script.
+var inlineTypes = map[string]bool{
+	"image/png":  true,
+	"image/jpeg": true,
+	"image/gif":  true,
+	"image/webp": true,
+}
+
+// Inline reports whether a stored file is served inline rather than as an
+// attachment.
+func Inline(contentType string) bool { return inlineTypes[contentType] }
+
+// storedContentType is the type recorded for an upload. The browser's type
+// is only trusted for attachments; a raster type is kept only when the
+// first bytes really are that format, so a script cannot pass as an image.
+func storedContentType(claimed string, head []byte) string {
+	mediaType, _, err := mime.ParseMediaType(claimed)
+	if err != nil {
+		mediaType = "application/octet-stream"
+	}
+	sniffed, _, _ := mime.ParseMediaType(http.DetectContentType(head))
+	switch {
+	case inlineTypes[mediaType] && sniffed == mediaType:
+		return mediaType
+	case inlineTypes[sniffed]:
+		return sniffed
+	case inlineTypes[mediaType]:
+		return "application/octet-stream"
+	}
+	return mediaType
+}
 
 // MaxUploadBytes is the size limit for one upload of the given content type.
 func MaxUploadBytes(contentType string) int64 {
@@ -89,9 +126,6 @@ func (f *Files) Upload(ctx context.Context, c Caller, pageID uuid.UUID, filename
 	if err := need(p.Access, domain.LevelEdit); err != nil {
 		return File{}, err
 	}
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
 	if size <= 0 {
 		return File{}, httperror.Validation("invalid upload", map[string]string{"file": "empty"})
 	}
@@ -99,6 +133,14 @@ func (f *Files) Upload(ctx context.Context, c Caller, pageID uuid.UUID, filename
 		return File{}, httperror.Validation("file too large", map[string]string{
 			"file": fmt.Sprintf("at most %d MB", limit>>20)})
 	}
+	head := make([]byte, 512)
+	n, err := io.ReadFull(r, head)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+		return File{}, err
+	}
+	head = head[:n]
+	contentType = storedContentType(contentType, head)
+	r = io.MultiReader(bytes.NewReader(head), r)
 	filename = cleanFilename(filename)
 	id := uuid.New()
 	ext := strings.ToLower(filepath.Ext(filename))

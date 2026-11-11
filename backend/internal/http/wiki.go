@@ -306,8 +306,8 @@ func (h *wikiHandler) uploadFile(r *http.Request, c wiki.Caller) (int, any, erro
 	return created(out, err)
 }
 
-// downloadFile streams a file after the page access check. Images render
-// inline (the editor shows them); everything else downloads.
+// downloadFile streams a file after the page access check. Raster images
+// render inline (the editor shows them); everything else downloads.
 func (h *wikiHandler) downloadFile(w http.ResponseWriter, r *http.Request) {
 	if h.files == nil {
 		httperror.Render(w, r, errFilesOff)
@@ -334,16 +334,24 @@ func (h *wikiHandler) downloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rc.Close() //nolint:errcheck
+	writeFileHeaders(w, f)
+	_, _ = io.Copy(w, rc)
+}
+
+// writeFileHeaders sets the headers of an upload download. Only raster
+// images render inline; everything else is an attachment. The sandbox CSP
+// keeps a file opened directly from running script on the wiki's address.
+func writeFileHeaders(w http.ResponseWriter, f wiki.File) {
 	disposition := "attachment"
-	if strings.HasPrefix(f.ContentType, "image/") {
+	if wiki.Inline(f.ContentType) {
 		disposition = "inline"
 	}
 	w.Header().Set("Content-Type", f.ContentType)
 	w.Header().Set("Content-Length", strconv.FormatInt(f.SizeBytes, 10))
 	w.Header().Set("Content-Disposition", disposition+`; filename="`+strings.ReplaceAll(f.Filename, `"`, "")+`"`)
+	w.Header().Set("Content-Security-Policy", "sandbox")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "private, max-age=3600")
-	_, _ = io.Copy(w, rc)
 }
 
 // ----------------------------------------------------------------------------

@@ -79,7 +79,7 @@ func TestFiles(t *testing.T) {
 	mustStatus(t, code, 201, "create page")
 	pageID := str(pg, "id")
 
-	payload := []byte("\x89PNG fake image bytes")
+	payload := []byte("\x89PNG\r\n\x1a\n image bytes")
 
 	// View access cannot upload; edit access can.
 	code, _ = uploadFile(t, h, security, pageID, "pic.png", "image/png", payload)
@@ -115,8 +115,36 @@ func TestFiles(t *testing.T) {
 		t.Fatalf("pdf content disposition = %q", cd)
 	}
 
-	if keys := objects.keys("wiki/files/" + pageID + "/"); len(keys) != 2 {
-		t.Fatalf("bucket should hold 2 uploads, got %v", keys)
+	if rec.Header().Get("Content-Security-Policy") != "sandbox" || rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("pdf download misses the sandbox CSP or nosniff: %v", rec.Header())
+	}
+
+	// Active content never renders on the wiki's address: SVG and HTML
+	// download as sandboxed attachments, and a script claiming to be a PNG
+	// is stored as plain bytes.
+	active := []struct{ name, contentType, body, wantType string }{
+		{"logo.svg", "image/svg+xml", `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`, "image/svg+xml"},
+		{"page.html", "text/html", "<!DOCTYPE html><html><script>alert(1)</script></html>", "text/html"},
+		{"fake.png", "image/png", "<!DOCTYPE html><html><script>alert(1)</script></html>", "application/octet-stream"},
+	}
+	for _, a := range active {
+		code, up := uploadFile(t, h, editor, pageID, a.name, a.contentType, []byte(a.body))
+		mustStatus(t, code, 201, "upload "+a.name)
+		if got := str(up, "content_type"); got != a.wantType {
+			t.Fatalf("%s stored as %q, want %q", a.name, got, a.wantType)
+		}
+		rec = rawGet(t, h, editor, str(up, "url"))
+		mustStatus(t, rec.Code, 200, "download "+a.name)
+		if cd := rec.Header().Get("Content-Disposition"); cd != `attachment; filename="`+a.name+`"` {
+			t.Fatalf("%s content disposition = %q", a.name, cd)
+		}
+		if rec.Header().Get("Content-Security-Policy") != "sandbox" || rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+			t.Fatalf("%s download misses the sandbox CSP or nosniff: %v", a.name, rec.Header())
+		}
+	}
+
+	if keys := objects.keys("wiki/files/" + pageID + "/"); len(keys) != 5 {
+		t.Fatalf("bucket should hold 5 uploads, got %v", keys)
 	}
 
 	// Delete forever removes the metadata (cascade) and the S3 objects.

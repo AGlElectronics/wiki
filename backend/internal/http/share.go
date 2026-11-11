@@ -4,8 +4,6 @@ import (
 	"encoding/base64"
 	"io"
 	"net/http"
-	"strconv"
-	"strings"
 
 	"github.com/AGlElectronics/wiki/backend/internal/config"
 	"github.com/AGlElectronics/wiki/backend/internal/denlink"
@@ -123,15 +121,7 @@ func (h *shareHandler) file(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rc.Close() //nolint:errcheck
-	disposition := "attachment"
-	if strings.HasPrefix(f.ContentType, "image/") {
-		disposition = "inline"
-	}
-	w.Header().Set("Content-Type", f.ContentType)
-	w.Header().Set("Content-Length", strconv.FormatInt(f.SizeBytes, 10))
-	w.Header().Set("Content-Disposition", disposition+`; filename="`+strings.ReplaceAll(f.Filename, `"`, "")+`"`)
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Cache-Control", "private, max-age=3600")
+	writeFileHeaders(w, f)
 	_, _ = io.Copy(w, rc)
 }
 
