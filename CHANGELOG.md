@@ -41,7 +41,10 @@ counts rebuilds of the same version. Rebuilds get no entry here.
   its module settings (`module_settings.wiki.revision_retention_days` in the integration
   bundle), which wins over the local value. The history panel says how long
   revisions are kept, and `GET /api/v1/pages/{page}/revisions` returns
-  `retention_days` and `retention_source`.
+  `retention_days` and `retention_source`. Den's value is kept with the
+  pairing, so it applies right after a restart, before Den is reached
+  again; a value that is not a whole number of days, 0 or more, is ignored
+  and `WIKI_REVISION_RETENTION_DAYS` applies.
 - Deleting a page forever, deleting a space and the offboarding sweep
   never leave page content behind in object storage. The sweep runs in one
   database transaction, and every page whose content still has to be
@@ -98,8 +101,12 @@ counts rebuilds of the same version. Rebuilds get no entry here.
   front of the backend whose `X-Forwarded-For` entries are believed. The
   default, `10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128,fc00::/7`,
   covers the Gateway, nginx and Caddy; change it only for a proxy outside
-  the private ranges, or set `none` when no proxy is in front. See
+  the private ranges, or set `none` when no proxy is in front. An invalid
+  entry stops the backend at start-up. See
   [Client IP addresses](https://aglelectronics.github.io/con-services/operations/production/#client-ip-addresses).
+- The web app can read the `X-Request-ID` response header from the API
+  across origins (`Access-Control-Expose-Headers: X-Request-ID`), so a
+  request ID can be quoted in error reports.
 - The backend can serve HTTPS. Set `TLS_CERT_FILE` and `TLS_KEY_FILE` to a
   PEM certificate and private key; the backend re-reads both every minute,
   so a certificate renewed by cert-manager is used without a restart. With
@@ -189,7 +196,13 @@ counts rebuilds of the same version. Rebuilds get no entry here.
   (`413 request_too_large`). Rate limits: public share links 120 a minute
   per client (bursts of 30), the offboarding hook 60 a minute per client,
   uploads 60 a minute per person (bursts of 20); over the limit answers
-  `429 rate_limited` with `Retry-After`.
+  `429 rate_limited` with `Retry-After`. Pairing with Den
+  (`POST /api/v1/den/pair`) and saving preferences
+  (`PUT /api/v1/me/preferences`) accept at most 64 KiB and answer
+  `413 request_too_large` above that. These codes (`bad_request`,
+  `request_too_large`, `unsupported_media_type`, `rate_limited`) are the
+  suite-wide ones from
+  [Shared code](https://aglelectronics.github.io/con-services/concepts/shared-code/#error-codes).
 - The web app's nginx sends the shared security headers (Content Security
   Policy, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`).
 - The people picker shows email addresses only to wiki admins, and only
