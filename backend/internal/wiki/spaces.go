@@ -18,6 +18,8 @@ type Service struct {
 	pool *pgxpool.Pool
 	// onDeleted runs after pages are deleted forever, to drop their content.
 	onDeleted func([]uuid.UUID)
+	// retentionDays is WIKI_REVISION_RETENTION_DAYS (0 keeps everything).
+	retentionDays int
 }
 
 // NewService constructs the wiki service.

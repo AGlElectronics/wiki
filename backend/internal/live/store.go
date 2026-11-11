@@ -329,6 +329,61 @@ func (s *Store) saveSnapshot(ctx context.Context, id uuid.UUID, prev []byte, pre
 	return remaining, nil
 }
 
+// pruneBatch bounds one prune query; prune loops until a batch comes back
+// short.
+const pruneBatch = 500
+
+// pruneRevisions deletes revisions created before cutoff: the S3 object
+// first, then its row, so a failed delete leaves the row to retry next
+// time instead of an object nobody points at. It returns how many went.
+func (s *Store) pruneRevisions(ctx context.Context, cutoff time.Time) (int, error) {
+	pruned := 0
+	failed := map[uuid.UUID]bool{}
+	for {
+		rows, err := s.pool.Query(ctx, `
+			SELECT id, storage_key FROM page_revisions
+			 WHERE created_at < $1 AND NOT (id = ANY($2))
+			 ORDER BY created_at LIMIT $3`, cutoff, mapKeys(failed), pruneBatch)
+		if err != nil {
+			return pruned, err
+		}
+		type rev struct {
+			id  uuid.UUID
+			key string
+		}
+		revs, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (rev, error) {
+			var v rev
+			err := r.Scan(&v.id, &v.key)
+			return v, err
+		})
+		if err != nil {
+			return pruned, err
+		}
+		for _, v := range revs {
+			if err := s.objects.Remove(ctx, v.key); err != nil {
+				s.log.Warn().Err(err).Str("key", v.key).Msg("could not remove an expired revision; retrying later")
+				failed[v.id] = true
+				continue
+			}
+			if _, err := s.pool.Exec(ctx, `DELETE FROM page_revisions WHERE id = $1`, v.id); err != nil {
+				return pruned, err
+			}
+			pruned++
+		}
+		if len(revs) < pruneBatch {
+			return pruned, nil
+		}
+	}
+}
+
+func mapKeys(m map[uuid.UUID]bool) []uuid.UUID {
+	out := make([]uuid.UUID, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
 // revisionMeta returns the page and storage key of a revision.
 func (s *Store) revisionMeta(ctx context.Context, rev uuid.UUID) (page uuid.UUID, key string, err error) {
 	err = s.pool.QueryRow(ctx, `SELECT page_id, storage_key FROM page_revisions WHERE id = $1`, rev).Scan(&page, &key)

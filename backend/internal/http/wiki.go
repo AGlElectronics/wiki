@@ -365,14 +365,21 @@ func writeFileHeaders(w http.ResponseWriter, f wiki.File) {
 // History
 // ----------------------------------------------------------------------------
 
-// listRevisions lists a page's history, newest first (view access).
+// listRevisions lists a page's history, newest first (view access), and
+// how long revisions are kept.
 func (h *wikiHandler) listRevisions(r *http.Request, c wiki.Caller) (int, any, error) {
 	id, err := parseUUIDParam(r, "page")
 	if err != nil {
 		return 0, nil, err
 	}
 	revs, err := h.svc.ListRevisions(r.Context(), c, id)
-	return ok(map[string]any{"revisions": revs}, err)
+	if err != nil {
+		return 0, nil, err
+	}
+	retention, err := h.svc.RevisionRetention(r.Context())
+	return ok(map[string]any{
+		"revisions": revs, "retention_days": retention.Days, "retention_source": retention.Source,
+	}, err)
 }
 
 // revisionBytes streams one revision's Yjs document for the read-only

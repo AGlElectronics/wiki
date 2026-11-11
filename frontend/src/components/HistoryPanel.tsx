@@ -52,17 +52,17 @@ export function HistoryPanel({ page, canEdit, onClose }: { page: Page; canEdit: 
     <Dialog title="Page history" onClose={onClose} className="max-w-3xl">
       {revisions.isLoading ? <LoadingRow /> : null}
       {revisions.isError ? <p className="text-sm text-destructive">{(revisions.error as Error).message}</p> : null}
-      {revisions.data && revisions.data.length === 0 ? (
+      {revisions.data && revisions.data.revisions.length === 0 ? (
         <EmptyState
           icon={History}
           title="No revisions yet"
           description="A revision is kept for every ~10 minutes of editing, and before every restore."
         />
       ) : null}
-      {revisions.data && revisions.data.length > 0 ? (
+      {revisions.data && revisions.data.revisions.length > 0 ? (
         <div className="flex gap-4 min-h-[18rem]">
           <ul className="w-56 shrink-0 space-y-1 overflow-y-auto max-h-[60vh]" aria-label="Revisions">
-            {revisions.data.map((rev) => (
+            {revisions.data.revisions.map((rev) => (
               <li key={rev.id}>
                 <button
                   type="button"
@@ -117,6 +117,12 @@ export function HistoryPanel({ page, canEdit, onClose }: { page: Page; canEdit: 
             )}
           </div>
         </div>
+      ) : null}
+      {revisions.data && revisions.data.retention_days > 0 ? (
+        <p className="text-xs text-muted-foreground">
+          Revisions older than {revisions.data.retention_days} days are deleted
+          {revisions.data.retention_source === 'den' ? ' (set in Den)' : ''}.
+        </p>
       ) : null}
     </Dialog>
   );

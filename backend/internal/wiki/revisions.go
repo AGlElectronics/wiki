@@ -2,6 +2,9 @@ package wiki
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +21,39 @@ type Revision struct {
 	// or manual.
 	Reason    string    `json:"reason"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// Retention is how long revisions are kept.
+type Retention struct {
+	// Days: revisions older than this are deleted; 0 keeps every revision.
+	Days int `json:"retention_days"`
+	// Source is "den" (Den's module settings) or "config"
+	// (WIKI_REVISION_RETENTION_DAYS).
+	Source string `json:"retention_source"`
+}
+
+// SetRevisionRetentionDays sets the local retention (0 keeps everything).
+// Set it before serving requests.
+func (s *Service) SetRevisionRetentionDays(days int) { s.retentionDays = days }
+
+// RevisionRetention is Den's retention.revision_days from the integration
+// bundle stored with the pairing, when Den sends a whole number of days
+// (0 or more); otherwise the local setting.
+func (s *Service) RevisionRetention(ctx context.Context) (Retention, error) {
+	local := Retention{Days: s.retentionDays, Source: "config"}
+	var raw []byte
+	err := s.pool.QueryRow(ctx, `SELECT bundle->'retention'->'revision_days' FROM den_link WHERE id = 1`).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && (raw == nil || string(raw) == "null")) {
+		return local, nil
+	}
+	if err != nil {
+		return local, err
+	}
+	var days float64
+	if json.Unmarshal(raw, &days) != nil || days < 0 || days != math.Trunc(days) {
+		return local, nil
+	}
+	return Retention{Days: int(days), Source: "den"}, nil
 }
 
 // ListRevisions returns a page's history, newest first (view access).

@@ -165,8 +165,16 @@ export type Revision = {
   created_at: string;
 };
 
+export type RevisionList = {
+  revisions: Revision[];
+  /** Revisions older than this are deleted; 0 keeps every revision. */
+  retention_days: number;
+  /** den: set in Den's module settings; config: WIKI_REVISION_RETENTION_DAYS. */
+  retention_source: 'den' | 'config';
+};
+
 export const listRevisions = (pageId: string, signal?: AbortSignal) =>
-  apiRequest<{ revisions: Revision[] }>(`/api/v1/pages/${pageId}/revisions`, { signal }).then((r) => r.revisions);
+  apiRequest<RevisionList>(`/api/v1/pages/${pageId}/revisions`, { signal });
 
 /** One revision's Yjs document, for the read-only preview. */
 export const fetchRevisionDoc = (revisionId: string) =>

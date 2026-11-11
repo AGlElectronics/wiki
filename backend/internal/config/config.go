@@ -95,6 +95,11 @@ type Config struct {
 	// stays (visible to wiki admins) before the sweep deletes it.
 	OffboardGraceDays int
 
+	// RevisionRetentionDays deletes page revisions older than this many
+	// days. 0 keeps every revision. Once paired, Den's integration bundle
+	// overrides it (retention.revision_days).
+	RevisionRetentionDays int
+
 	// Group picker directories (package directory). HR is used while the
 	// module is paired with Den; the identity provider otherwise. Empty
 	// URLs turn a source off.
@@ -155,6 +160,8 @@ func Load() (*Config, error) {
 		ServiceToken:      getEnv("WIKI_SERVICE_TOKEN", ""),
 		OffboardGraceDays: getEnvInt("WIKI_OFFBOARD_GRACE_DAYS", 30),
 
+		RevisionRetentionDays: getEnvInt("WIKI_REVISION_RETENTION_DAYS", 0),
+
 		HRDirectoryURL:           getEnv("HR_DIRECTORY_URL", ""),
 		HRDirectoryToken:         getEnv("HR_DIRECTORY_TOKEN", ""),
 		IdPDirectoryURL:          getEnv("IDP_DIRECTORY_URL", ""),
@@ -183,6 +190,9 @@ func (c *Config) validate() error {
 	}
 	if err := c.DenMode.Validate(); err != nil {
 		errs = append(errs, err.Error())
+	}
+	if c.RevisionRetentionDays < 0 {
+		errs = append(errs, "WIKI_REVISION_RETENTION_DAYS must be 0 (keep every revision) or a number of days")
 	}
 	if c.HRDirectoryURL != "" && c.HRDirectoryToken == "" {
 		errs = append(errs, "HR_DIRECTORY_TOKEN is required when HR_DIRECTORY_URL is set")

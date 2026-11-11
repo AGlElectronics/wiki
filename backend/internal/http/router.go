@@ -168,6 +168,7 @@ func NewRouter(deps Deps, version string) http.Handler {
 	svc := deps.Wiki
 	if svc == nil {
 		svc = wiki.NewService(deps.Pool)
+		svc.SetRevisionRetentionDays(deps.Config.RevisionRetentionDays)
 	}
 	hrGroups, idpGroups := groupSources(deps)
 	wh := &wikiHandler{svc: svc, live: deps.Live, files: deps.Files, den: den, hrGroups: hrGroups, idpGroups: idpGroups}

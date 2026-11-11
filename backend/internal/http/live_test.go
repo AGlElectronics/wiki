@@ -33,7 +33,7 @@ import (
 type memObjects struct {
 	mu   sync.Mutex
 	data map[string][]byte
-	// failRemove makes RemovePrefix fail, like an unreachable bucket.
+	// failRemove makes Remove and RemovePrefix fail, like an unreachable bucket.
 	failRemove bool
 }
 
@@ -57,6 +57,9 @@ func (o *memObjects) Get(_ context.Context, key string) ([]byte, error) {
 func (o *memObjects) Remove(_ context.Context, key string) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if o.failRemove {
+		return fmt.Errorf("bucket unreachable")
+	}
 	delete(o.data, key)
 	return nil
 }

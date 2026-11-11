@@ -99,6 +99,7 @@ func Run(ctx context.Context, logger zerolog.Logger) error {
 	// the start, like a wrong database URL; no S3_ENDPOINT turns live
 	// editing off (page tree and sharing still work).
 	svc := wiki.NewService(pool)
+	svc.SetRevisionRetentionDays(cfg.RevisionRetentionDays)
 	var liveMgr *live.Manager
 	var filesSvc *wiki.Files
 	filesCtx, cancelFiles := context.WithTimeout(ctx, 15*time.Second)
@@ -130,7 +131,7 @@ func Run(ctx context.Context, logger zerolog.Logger) error {
 	// Hourly maintenance (and once at start-up). Uses svc so the live
 	// manager's delete hook also removes the stored content.
 	go func() {
-		maintain(ctx, svc, cfg, logger)
+		maintain(ctx, svc, liveMgr, cfg, logger)
 		t := time.NewTicker(time.Hour)
 		defer t.Stop()
 		for {
@@ -138,7 +139,7 @@ func Run(ctx context.Context, logger zerolog.Logger) error {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				maintain(ctx, svc, cfg, logger)
+				maintain(ctx, svc, liveMgr, cfg, logger)
 			}
 		}
 	}()
@@ -170,9 +171,10 @@ func Run(ctx context.Context, logger zerolog.Logger) error {
 }
 
 // maintain runs the hourly jobs: the offboarding sweep (private spaces of
-// offboarded people, after WIKI_OFFBOARD_GRACE_DAYS) and retrying stored
-// content that could not be deleted yet.
-func maintain(ctx context.Context, svc *wiki.Service, cfg *config.Config, logger zerolog.Logger) {
+// offboarded people, after WIKI_OFFBOARD_GRACE_DAYS), retrying stored
+// content that could not be deleted yet, and deleting revisions past the
+// retention (WIKI_REVISION_RETENTION_DAYS or Den's module settings).
+func maintain(ctx context.Context, svc *wiki.Service, liveMgr *live.Manager, cfg *config.Config, logger zerolog.Logger) {
 	sctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	grace := time.Duration(cfg.OffboardGraceDays) * 24 * time.Hour
@@ -185,6 +187,19 @@ func maintain(ctx context.Context, svc *wiki.Service, cfg *config.Config, logger
 		logger.Warn().Err(err).Msg("could not list page content waiting for deletion")
 	} else if n > 0 {
 		logger.Info().Int("pages", n).Msg("retrying deletion of stored page content")
+	}
+	if liveMgr == nil {
+		return
+	}
+	retention, err := svc.RevisionRetention(sctx)
+	if err != nil {
+		logger.Warn().Err(err).Msg("could not read Den's revision retention; using WIKI_REVISION_RETENTION_DAYS")
+	}
+	if n, err := liveMgr.PruneRevisions(sctx, retention.Days); err != nil {
+		logger.Warn().Err(err).Msg("revision retention failed; retrying next hour")
+	} else if n > 0 {
+		logger.Info().Int("revisions", n).Int("days", retention.Days).Str("source", retention.Source).
+			Msg("deleted revisions past the retention")
 	}
 }
 

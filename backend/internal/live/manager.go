@@ -244,6 +244,15 @@ func (m *Manager) forget(ids []uuid.UUID) {
 	}()
 }
 
+// PruneRevisions deletes revisions older than days (0 keeps everything)
+// and returns how many went.
+func (m *Manager) PruneRevisions(ctx context.Context, days int) (int, error) {
+	if days <= 0 {
+		return 0, nil
+	}
+	return m.store.pruneRevisions(ctx, time.Now().Add(-time.Duration(days)*24*time.Hour))
+}
+
 // CopyContent duplicates stored documents for a page duplication (old id →
 // new id). Open hubs of the sources are shipped first so the copy includes
 // everything on disk.
