@@ -153,6 +153,14 @@ counts rebuilds of the same version. Rebuilds get no entry here.
   an SBOM published to GHCR on version tags (linux/amd64; linux/arm64
   optional).
 
+### Changed
+
+- Group directory on Kubernetes: with `HR_DIRECTORY_URL` set, turn on
+  `networkPolicy.hr.enabled`. That egress reaches HR's backend in
+  `conservices-hr` on port 8080 (`GET /api/internal/directory/groups`,
+  bearer `HR_DIRECTORY_TOKEN`). HR's chart already admits Wiki, and HR
+  serves the directory when its token is set.
+
 ### Security
 
 - Rate limits cannot be bypassed with a fake `X-Forwarded-For` header: the
