@@ -253,6 +253,33 @@ func TestConfigValidate(t *testing.T) {
 	if strings.Join(cfg.AllowedHosts, "|") != "den.example.org|*.con.example.org" {
 		t.Errorf("AllowedHosts = %q", cfg.AllowedHosts)
 	}
+	cfg, err := FromEnv("hr", "1.0.0", env(map[string]string{"APP_ENV": " Development "}))
+	if err != nil || cfg.AppEnv != "development" {
+		t.Errorf("APP_ENV=' Development ': AppEnv = %q, err = %v; want development without a key", cfg.AppEnv, err)
+	}
+	if cfg, _ := FromEnv("hr", "1.0.0", env(nil)); cfg.AppEnv != "production" {
+		t.Errorf("unset APP_ENV: AppEnv = %q, want production", cfg.AppEnv)
+	}
+	if !(Config{AppEnv: "DEVELOPMENT"}).HostAllowed("localhost") {
+		t.Error("a hand-built Config must normalise APP_ENV too")
+	}
+}
+
+// The same cases are in authbase's TestNormalizeAppEnv; keep them identical.
+func TestNormalizeAppEnv(t *testing.T) {
+	for in, want := range map[string]string{
+		"":               "production",
+		"   ":            "production",
+		"development":    "development",
+		" Development\n": "development",
+		"DEVELOPMENT":    "development",
+		"Production":     "production",
+		" staging ":      "staging",
+	} {
+		if got := NormalizeAppEnv(in); got != want {
+			t.Errorf("NormalizeAppEnv(%q) = %q, want %q", in, got, want)
+		}
+	}
 }
 
 func TestHostAllowed(t *testing.T) {

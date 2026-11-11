@@ -54,6 +54,26 @@ func TestFromEnv(t *testing.T) {
 	if (Config{AuthMode: AuthDev}).DevAuth() {
 		t.Error("dev mode without development must never be DevAuth")
 	}
+	if !(Config{AuthMode: AuthDev, AppEnv: " Development "}).DevAuth() {
+		t.Error("a hand-built Config must normalise APP_ENV too")
+	}
+}
+
+// The same cases are in denlink's TestNormalizeAppEnv; keep them identical.
+func TestNormalizeAppEnv(t *testing.T) {
+	for in, want := range map[string]string{
+		"":               "production",
+		"   ":            "production",
+		"development":    "development",
+		" Development\n": "development",
+		"DEVELOPMENT":    "development",
+		"Production":     "production",
+		" staging ":      "staging",
+	} {
+		if got := NormalizeAppEnv(in); got != want {
+			t.Errorf("NormalizeAppEnv(%q) = %q, want %q", in, got, want)
+		}
+	}
 }
 
 func TestAllowedHeaders(t *testing.T) {
@@ -314,12 +334,46 @@ func TestRateLimiterMiddleware(t *testing.T) {
 }
 
 func TestClientIP(t *testing.T) {
-	for addr, want := range map[string]string{"10.1.2.3:443": "ip:10.1.2.3", "[2001:db8::1]:80": "ip:2001:db8::1", "weird": "ip:weird"} {
+	for addr, want := range map[string]string{
+		"10.1.2.3:443":                 "ip:10.1.2.3",
+		"10.1.2.4:443":                 "ip:10.1.2.4",
+		"[2001:db8::1]:80":             "ip:2001:db8::/64",
+		"[2001:db8:0:0:ffff:1:2:3]:80": "ip:2001:db8::/64",
+		"[2001:db8:0:1::1]:80":         "ip:2001:db8:0:1::/64",
+		"[::ffff:192.0.2.9]:80":        "ip:192.0.2.9",
+		"[fe80::1%eth0]:80":            "ip:fe80::/64",
+		"2001:db8:aa:bb:cc:dd:ee:ff":   "ip:2001:db8:aa:bb::/64",
+		"weird":                        "ip:weird",
+	} {
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.RemoteAddr = addr
 		if got := ClientIP(r); got != want {
 			t.Errorf("ClientIP(%q) = %q, want %q", addr, got, want)
 		}
+	}
+}
+
+func TestRateLimiterSharesIPv6Slash64(t *testing.T) {
+	l := NewRateLimiter(RateLimitOptions{Rate: 1, Burst: 1, Now: func() time.Time { return time.Unix(0, 0) }})
+	h := l.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	do := func(addr string) int {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.RemoteAddr = addr
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, r)
+		return rec.Code
+	}
+	if do("[2001:db8:1:2::1]:1000") != 200 {
+		t.Fatal("first request limited")
+	}
+	if do("[2001:db8:1:2::beef]:1001") != http.StatusTooManyRequests {
+		t.Error("another address in the same /64 got a bucket of its own")
+	}
+	if do("[2001:db8:1:3::1]:1000") != 200 {
+		t.Error("the next /64 shares the bucket")
+	}
+	if do("192.0.2.1:1000") != 200 || do("192.0.2.2:1000") != 200 {
+		t.Error("IPv4 addresses must be limited one by one")
 	}
 }
 

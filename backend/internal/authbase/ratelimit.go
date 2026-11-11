@@ -8,6 +8,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,15 +19,33 @@ import (
 // limited.
 type KeyFunc func(r *http.Request) string
 
-// ClientIP keys by the client address in r.RemoteAddr. Run it after the
-// backend's trusted-proxy handling (TRUSTED_PROXY_CIDRS) has replaced
-// RemoteAddr with the real client.
+// ClientIP keys by the client address in r.RemoteAddr: an IPv4 address on
+// its own ("ip:203.0.113.7"), an IPv6 address by its /64
+// ("ip:2001:db8:1:2::/64"), because one subscriber usually gets a whole /64
+// and could otherwise pick a fresh address per request. IPv4-mapped IPv6
+// addresses count as IPv4. It never reads forwarding headers: behind a
+// proxy, mount TrustedProxies.Middleware (Config.TrustedProxies, from
+// TRUSTED_PROXY_CIDRS) first, or the backend's own trusted-proxy handling,
+// so RemoteAddr is the real client; or use TrustedProxies.ClientIP as the
+// key.
 func ClientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
 	}
-	return "ip:" + host
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return "ip:" + host
+	}
+	return ipKey(addr)
+}
+
+func ipKey(addr netip.Addr) string {
+	addr = addr.Unmap().WithZone("")
+	if addr.Is6() {
+		return "ip:" + netip.PrefixFrom(addr, 64).Masked().String()
+	}
+	return "ip:" + addr.String()
 }
 
 // BySubject keys by the signed-in person when user returns one, and by
@@ -174,7 +193,7 @@ func (l *RateLimiter) Middleware(next http.Handler) http.Handler {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusTooManyRequests)
 			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{
-				"code": "rate_limited", "message": "Too many requests; try again in " + strconv.Itoa(secs) + " seconds.",
+				"code": CodeRateLimited, "message": "Too many requests; try again in " + strconv.Itoa(secs) + " seconds.",
 			}})
 			return
 		}

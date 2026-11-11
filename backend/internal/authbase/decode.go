@@ -12,6 +12,16 @@ import (
 	"strings"
 )
 
+// Error codes authbase writes in {"error":{"code":…,"message":…}}. They are
+// part of the API contract (docs/concepts/shared-code.md#error-codes):
+// modules return them unchanged and web apps may switch on them.
+const (
+	CodeBadRequest           = "bad_request"            // 400: body is not one valid JSON value
+	CodeRequestTooLarge      = "request_too_large"      // 413: body over DecodeOptions.MaxBytes
+	CodeUnsupportedMediaType = "unsupported_media_type" // 415: Content-Type is not JSON
+	CodeRateLimited          = "rate_limited"           // 429: with Retry-After
+)
+
 // DefaultMaxBodyBytes is the request body limit DecodeJSON uses when
 // DecodeOptions.MaxBytes is 0 (1 MiB).
 const DefaultMaxBodyBytes int64 = 1 << 20
@@ -47,7 +57,7 @@ func (e *DecodeError) Unwrap() error { return e.Err }
 func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any, o DecodeOptions) error {
 	if o.RequireJSONContentType {
 		if ct := r.Header.Get("Content-Type"); !isJSONContentType(ct) {
-			return &DecodeError{Status: http.StatusUnsupportedMediaType, Code: "unsupported_media_type", Message: "Content-Type must be application/json"}
+			return &DecodeError{Status: http.StatusUnsupportedMediaType, Code: CodeUnsupportedMediaType, Message: "Content-Type must be application/json"}
 		}
 	}
 	limit := o.MaxBytes
@@ -66,7 +76,7 @@ func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any, o DecodeOptions
 		if errors.As(err, &tooBig) {
 			return decodeError(err, limit)
 		}
-		return &DecodeError{Status: http.StatusBadRequest, Code: "bad_request", Message: "request body must contain a single JSON value", Err: err}
+		return &DecodeError{Status: http.StatusBadRequest, Code: CodeBadRequest, Message: "request body must contain a single JSON value", Err: err}
 	}
 	return nil
 }
@@ -76,7 +86,7 @@ func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any, o DecodeOptions
 func WriteDecodeError(w http.ResponseWriter, err error) {
 	var de *DecodeError
 	if !errors.As(err, &de) {
-		de = &DecodeError{Status: http.StatusBadRequest, Code: "bad_request", Message: "invalid JSON body"}
+		de = &DecodeError{Status: http.StatusBadRequest, Code: CodeBadRequest, Message: "invalid JSON body"}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(de.Status)
@@ -98,11 +108,11 @@ func decodeError(err error, limit int64) error {
 		typeError *json.UnmarshalTypeError
 	)
 	bad := func(msg string) error {
-		return &DecodeError{Status: http.StatusBadRequest, Code: "bad_request", Message: msg, Err: err}
+		return &DecodeError{Status: http.StatusBadRequest, Code: CodeBadRequest, Message: msg, Err: err}
 	}
 	switch {
 	case errors.As(err, &tooBig):
-		return &DecodeError{Status: http.StatusRequestEntityTooLarge, Code: "request_too_large", Message: fmt.Sprintf("request body is larger than %d bytes", limit), Err: err}
+		return &DecodeError{Status: http.StatusRequestEntityTooLarge, Code: CodeRequestTooLarge, Message: fmt.Sprintf("request body is larger than %d bytes", limit), Err: err}
 	case errors.Is(err, io.EOF):
 		return bad("request body is empty")
 	case errors.Is(err, io.ErrUnexpectedEOF):

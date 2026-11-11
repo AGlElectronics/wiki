@@ -55,7 +55,15 @@ type CORSOptions struct {
 	ExtraHeaders []string
 	// MaxAge is how long browsers cache a preflight, in seconds (default 300).
 	MaxAge int
+	// ExposeHeaders are the response headers the browser lets the page
+	// read (Access-Control-Expose-Headers). nil means DefaultExposeHeaders;
+	// an empty, non-nil slice exposes none.
+	ExposeHeaders []string
 }
+
+// DefaultExposeHeaders are exposed when CORSOptions.ExposeHeaders is nil:
+// X-Request-ID, so the web app can show it in error reports.
+var DefaultExposeHeaders = []string{"X-Request-ID"}
 
 // CORS answers preflight requests and sets Access-Control-* headers for
 // the allowed origins. Requests from other origins get no CORS headers (the
@@ -76,6 +84,11 @@ func (c Config) CORS(o CORSOptions) func(http.Handler) http.Handler {
 	if maxAge == 0 {
 		maxAge = 300
 	}
+	expose := o.ExposeHeaders
+	if expose == nil {
+		expose = DefaultExposeHeaders
+	}
+	exposed := strings.Join(expose, ", ")
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
@@ -96,6 +109,9 @@ func (c Config) CORS(o CORSOptions) func(http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			if !preflight {
+				if exposed != "" {
+					w.Header().Set("Access-Control-Expose-Headers", exposed)
+				}
 				next.ServeHTTP(w, r)
 				return
 			}
