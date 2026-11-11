@@ -155,6 +155,10 @@ counts rebuilds of the same version. Rebuilds get no entry here.
 
 ### Changed
 
+- The shared Den client is the current copy from `con-services`. Go error
+  text is lowercase; the sentence an admin sees when pairing fails, and
+  the text stored in `den_link.last_error`, stays the original wording.
+  Wiki does not send mail, so it does not fetch Den's SMTP password.
 - Group directory on Kubernetes: with `HR_DIRECTORY_URL` set, turn on
   `networkPolicy.hr.enabled`. That egress reaches HR's backend in
   `conservices-hr` on port 8080 (`GET /api/internal/directory/groups`,
@@ -163,6 +167,13 @@ counts rebuilds of the same version. Rebuilds get no entry here.
 
 ### Security
 
+- A reload can sign in again without a password. `/silent-callback.html`
+  may be framed by Wiki itself (`frame-ancestors 'self'`,
+  `X-Frame-Options: SAMEORIGIN`). Every other page stays unframeable.
+  When you replace the image's security headers with your own origins,
+  mount `security-headers-frame-self.conf` (the same origins, those two
+  differences) next to `security-headers.conf`. The Helm chart does this
+  from `frontend.securityHeaders`.
 - Rate limits cannot be bypassed with a fake `X-Forwarded-For` header: the
   backend reads the client address from it only when the connection comes
   from a trusted proxy (`TRUSTED_PROXY_CIDRS`), and never reads
