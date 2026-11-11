@@ -215,7 +215,8 @@ func (m *Manager) release(h *hub) {
 	m.serving.Done()
 }
 
-// forget closes and deletes the content of pages deleted forever.
+// forget closes and deletes the content of pages deleted forever, and
+// clears each page from the deletion queue once its objects are gone.
 func (m *Manager) forget(ids []uuid.UUID) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -230,7 +231,14 @@ func (m *Manager) forget(ids []uuid.UUID) {
 				h.closeLog()
 			}
 			if err := m.store.forget(ctx, id); err != nil {
-				m.log.Warn().Err(err).Str("page", id.String()).Msg("could not delete page content")
+				m.log.Warn().Err(err).Str("page", id.String()).Msg("could not delete page content; retrying later")
+				if err := m.svc.ContentDeletionFailed(ctx, id, err); err != nil {
+					m.log.Warn().Err(err).Str("page", id.String()).Msg("could not record the failed content deletion")
+				}
+				continue
+			}
+			if err := m.svc.ContentDeleted(ctx, id); err != nil {
+				m.log.Warn().Err(err).Str("page", id.String()).Msg("could not clear the content deletion queue")
 			}
 		}
 	}()

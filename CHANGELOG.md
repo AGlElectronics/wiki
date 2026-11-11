@@ -24,6 +24,16 @@ counts rebuilds of the same version. Rebuilds get no entry here.
   that expires (when Den's `wiki_public_links` allows it).
 - Page history with restore, a trash, and an offboarding hook that HR
   calls to hand a departing volunteer's private notes to the admins.
+  The hook (`POST /api/internal/offboarded`) takes `issuer` and `subject`
+  and matches the person on both, so the same subject from another sign-in
+  server is never affected. A request without `issuer` still matches on
+  the subject alone and is logged as a warning.
+- Deleting a page forever, deleting a space and the offboarding sweep
+  never leave page content behind in object storage. The sweep runs in one
+  database transaction, and every page whose content still has to be
+  removed from S3 is queued in the same transaction; content that could not
+  be deleted (for example while S3 was unreachable) is retried every hour
+  and at start-up. Migration `20261115000001` adds the queue.
 - Databases (tables, boards, calendars) for small structured lists.
 - Sharing with a group ignores upper and lower case and a leading `/`, so a
   grant to `Dept-Security` matches Keycloak's `/dept-security`. A nested

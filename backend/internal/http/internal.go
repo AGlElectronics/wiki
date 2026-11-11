@@ -3,6 +3,7 @@ package http
 import (
 	"crypto/subtle"
 	"net/http"
+	"strings"
 
 	"github.com/rs/zerolog/hlog"
 
@@ -29,7 +30,9 @@ func (h *internalHandler) authorized(r *http.Request) bool {
 
 // offboarded is HR's hook after someone's account is deleted: the person's
 // private space is handed to the admins and swept after the grace period.
-// Idempotent; a subject the wiki never saw is still a 204.
+// The person is matched on issuer and subject; without an issuer (an older
+// HR) on the subject alone, which is logged. Idempotent; a person the wiki
+// never saw is still a 204.
 func (h *internalHandler) offboarded(w http.ResponseWriter, r *http.Request) {
 	if h.token == "" {
 		httperror.Render(w, r, httperror.NotFound("resource"))
@@ -40,6 +43,8 @@ func (h *internalHandler) offboarded(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
+		// Issuer is the OIDC issuer URL the subject belongs to.
+		Issuer string `json:"issuer"`
 		// Subject is the IdP subject (the Keycloak user id).
 		Subject  string `json:"subject"`
 		Username string `json:"username"`
@@ -48,16 +53,22 @@ func (h *internalHandler) offboarded(w http.ResponseWriter, r *http.Request) {
 		httperror.Render(w, r, err)
 		return
 	}
+	in.Issuer, in.Subject = strings.TrimSpace(in.Issuer), strings.TrimSpace(in.Subject)
 	if in.Subject == "" {
 		httperror.Render(w, r, httperror.Validation("invalid request", map[string]string{"subject": "required"}))
 		return
 	}
-	n, err := h.svc.OrphanPrivateSpaces(r.Context(), in.Subject)
+	log := hlog.FromRequest(r)
+	if in.Issuer == "" {
+		log.Warn().Str("subject", in.Subject).Str("username", in.Username).
+			Msg("offboarding: no issuer sent; matching on the subject alone")
+	}
+	n, err := h.svc.OrphanPrivateSpaces(r.Context(), in.Issuer, in.Subject)
 	if err != nil {
 		httperror.Render(w, r, err)
 		return
 	}
-	hlog.FromRequest(r).Info().Str("subject", in.Subject).Str("username", in.Username).
+	log.Info().Str("issuer", in.Issuer).Str("subject", in.Subject).Str("username", in.Username).
 		Int("spaces", n).Msg("offboarding: private spaces orphaned")
 	w.WriteHeader(http.StatusNoContent)
 }

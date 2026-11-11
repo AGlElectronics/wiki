@@ -13,14 +13,18 @@ import (
 // a banner), then removed by the sweep after the grace period. HR calls
 // OrphanPrivateSpaces through /api/internal/offboarded.
 
-// OrphanPrivateSpaces stamps the private spaces of every user with this
-// IdP subject (idempotent; an unknown subject is fine — the person may
-// never have opened the wiki).
-func (s *Service) OrphanPrivateSpaces(ctx context.Context, subject string) (int, error) {
+// OrphanPrivateSpaces stamps the private spaces of the user with this IdP
+// issuer and subject (idempotent; an unknown person is fine — they may
+// never have opened the wiki). Issuers compare without a trailing "/".
+// An empty issuer matches the subject under any issuer; the handler logs
+// that, because a subject is only unique within one issuer.
+func (s *Service) OrphanPrivateSpaces(ctx context.Context, issuer, subject string) (int, error) {
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE spaces SET orphaned_at = now(), updated_at = now()
 		 WHERE kind = 'private' AND orphaned_at IS NULL
-		   AND owner_id IN (SELECT id FROM users WHERE subject = $1)`, subject)
+		   AND owner_id IN (SELECT id FROM users
+		                     WHERE subject = $2 AND ($1 = '' OR rtrim(issuer, '/') = rtrim($1, '/')))`,
+		issuer, subject)
 	if err != nil {
 		return 0, err
 	}
@@ -28,32 +32,42 @@ func (s *Service) OrphanPrivateSpaces(ctx context.Context, subject string) (int,
 }
 
 // SweepOrphaned deletes orphaned private spaces older than the grace
-// period, with every page in them (the live manager removes the content).
-// It returns how many spaces went.
+// period, with every page in them, in one transaction that also queues
+// the pages' stored content for deletion (content_deletions). It returns
+// how many spaces went.
 func (s *Service) SweepOrphaned(ctx context.Context, grace time.Duration) (int, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT id FROM spaces WHERE kind = 'private' AND orphaned_at IS NOT NULL AND orphaned_at < $1`,
-		time.Now().Add(-grace))
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	rows, err := tx.Query(ctx, `
+		SELECT id FROM spaces WHERE kind = 'private' AND orphaned_at IS NOT NULL AND orphaned_at < $1
+		 FOR UPDATE`, time.Now().Add(-grace))
 	if err != nil {
 		return 0, err
 	}
 	spaces, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	if err != nil || len(spaces) == 0 {
+		return 0, err
+	}
+	rows, err = tx.Query(ctx, `SELECT id FROM pages WHERE space_id = ANY($1)`, spaces)
 	if err != nil {
 		return 0, err
 	}
-	for _, spaceID := range spaces {
-		prows, err := s.pool.Query(ctx, `SELECT id FROM pages WHERE space_id = $1`, spaceID)
-		if err != nil {
-			return 0, err
-		}
-		pages, err := pgx.CollectRows(prows, pgx.RowTo[uuid.UUID])
-		if err != nil {
-			return 0, err
-		}
-		if _, err := s.pool.Exec(ctx, `DELETE FROM spaces WHERE id = $1`, spaceID); err != nil {
-			return 0, err
-		}
-		s.deleted(pages)
+	pages, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	if err != nil {
+		return 0, err
 	}
+	if err := s.queueDeletion(ctx, tx, pages); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM spaces WHERE id = ANY($1)`, spaces); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	s.deleted(pages)
 	return len(spaces), nil
 }

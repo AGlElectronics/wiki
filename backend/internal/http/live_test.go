@@ -33,6 +33,8 @@ import (
 type memObjects struct {
 	mu   sync.Mutex
 	data map[string][]byte
+	// failRemove makes RemovePrefix fail, like an unreachable bucket.
+	failRemove bool
 }
 
 func (o *memObjects) Put(_ context.Context, key string, data []byte, _ string) error {
@@ -62,6 +64,9 @@ func (o *memObjects) Remove(_ context.Context, key string) error {
 func (o *memObjects) RemovePrefix(_ context.Context, prefix string) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if o.failRemove {
+		return fmt.Errorf("bucket unreachable")
+	}
 	for k := range o.data {
 		if strings.HasPrefix(k, prefix) {
 			delete(o.data, k)
@@ -102,6 +107,7 @@ func (o *memObjects) keys(prefix string) []string {
 // liveServer is one backend process: a manager and its HTTP server.
 type liveServer struct {
 	mgr *live.Manager
+	svc *wiki.Service
 	h   nethttp.Handler
 	srv *httptest.Server
 }
@@ -122,7 +128,7 @@ func startLive(t *testing.T, deps httpx.Deps, objects *memObjects, dir string) *
 	h := httpx.NewRouter(deps, "test")
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return &liveServer{mgr: mgr, h: h, srv: srv}
+	return &liveServer{mgr: mgr, svc: svc, h: h, srv: srv}
 }
 
 func (s *liveServer) stop() {

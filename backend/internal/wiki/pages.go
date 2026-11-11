@@ -478,6 +478,9 @@ func (s *Service) DeletePage(ctx context.Context, c Caller, id uuid.UUID) error 
 				gone = append(gone, p.ID)
 			}
 		}
+		if err := s.queueDeletion(ctx, tx, gone); err != nil {
+			return err
+		}
 		_, err := tx.Exec(ctx, `DELETE FROM pages WHERE id = $1`, id)
 		return err
 	})

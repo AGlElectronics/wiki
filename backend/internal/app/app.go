@@ -127,11 +127,10 @@ func Run(ctx context.Context, logger zerolog.Logger) error {
 		logger.Warn().Msg("S3_ENDPOINT not set; live editing and uploads are off")
 	}
 
-	// Offboarded people's private spaces are deleted after the grace
-	// period (WIKI_OFFBOARD_GRACE_DAYS); checked hourly. Uses svc so the
-	// live manager's delete hook also removes the stored content.
+	// Hourly maintenance (and once at start-up). Uses svc so the live
+	// manager's delete hook also removes the stored content.
 	go func() {
-		grace := time.Duration(cfg.OffboardGraceDays) * 24 * time.Hour
+		maintain(ctx, svc, cfg, logger)
 		t := time.NewTicker(time.Hour)
 		defer t.Stop()
 		for {
@@ -139,14 +138,7 @@ func Run(ctx context.Context, logger zerolog.Logger) error {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				sctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-				n, err := svc.SweepOrphaned(sctx, grace)
-				cancel()
-				if err != nil {
-					logger.Warn().Err(err).Msg("offboarding sweep failed; retrying next hour")
-				} else if n > 0 {
-					logger.Info().Int("spaces", n).Msg("offboarding sweep removed orphaned private spaces")
-				}
+				maintain(ctx, svc, cfg, logger)
 			}
 		}
 	}()
@@ -175,6 +167,25 @@ func Run(ctx context.Context, logger zerolog.Logger) error {
 	}
 
 	return runServer(ctx, server, pool, liveMgr, cfg.ShutdownTimeout, logger)
+}
+
+// maintain runs the hourly jobs: the offboarding sweep (private spaces of
+// offboarded people, after WIKI_OFFBOARD_GRACE_DAYS) and retrying stored
+// content that could not be deleted yet.
+func maintain(ctx context.Context, svc *wiki.Service, cfg *config.Config, logger zerolog.Logger) {
+	sctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	grace := time.Duration(cfg.OffboardGraceDays) * 24 * time.Hour
+	if n, err := svc.SweepOrphaned(sctx, grace); err != nil {
+		logger.Warn().Err(err).Msg("offboarding sweep failed; retrying next hour")
+	} else if n > 0 {
+		logger.Info().Int("spaces", n).Msg("offboarding sweep removed orphaned private spaces")
+	}
+	if n, err := svc.RetryContentDeletions(sctx, 10*time.Minute); err != nil {
+		logger.Warn().Err(err).Msg("could not list page content waiting for deletion")
+	} else if n > 0 {
+		logger.Info().Int("pages", n).Msg("retrying deletion of stored page content")
+	}
 }
 
 func runServer(ctx context.Context, server *nethttp.Server, pool *pgxpool.Pool, liveMgr *live.Manager, shutdownTimeout time.Duration, logger zerolog.Logger) error {

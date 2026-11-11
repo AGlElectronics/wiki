@@ -257,7 +257,12 @@ func (s *Service) DeleteSpace(ctx context.Context, c Caller, id uuid.UUID) error
 	if sp.Kind == domain.SpacePrivate && sp.OrphanedAt == nil {
 		return httperror.Conflict("a private space cannot be deleted")
 	}
-	rows, err := s.pool.Query(ctx, `SELECT id FROM pages WHERE space_id = $1`, id)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	rows, err := tx.Query(ctx, `SELECT id FROM pages WHERE space_id = $1`, id)
 	if err != nil {
 		return err
 	}
@@ -265,7 +270,13 @@ func (s *Service) DeleteSpace(ctx context.Context, c Caller, id uuid.UUID) error
 	if err != nil {
 		return err
 	}
-	if _, err = s.pool.Exec(ctx, `DELETE FROM spaces WHERE id = $1`, id); err != nil {
+	if err := s.queueDeletion(ctx, tx, pages); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM spaces WHERE id = $1`, id); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return err
 	}
 	s.deleted(pages)
