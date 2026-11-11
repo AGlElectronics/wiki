@@ -77,7 +77,7 @@ func TestRevisionRetention(t *testing.T) {
 	// Den's module settings win once paired.
 	if _, err := deps.Pool.Exec(ctx, `
 		INSERT INTO den_link (den_base_url, credential, bundle)
-		VALUES ('https://den.test', 'cred', '{"brand":{},"settings":{"data":{}},"retention":{"revision_days":7}}')`); err != nil {
+		VALUES ('https://den.test', 'cred', '{"brand":{},"settings":{"data":{}},"module_settings":{"data":{"retention":{"revision_days":7}}}}')`); err != nil {
 		t.Fatalf("pair: %v", err)
 	}
 	retention, err := s.svc.RevisionRetention(ctx)
@@ -95,7 +95,7 @@ func TestRevisionRetention(t *testing.T) {
 
 	// A value Den sends that is not a whole number of days is ignored.
 	for _, bad := range []string{`"30"`, `-1`, `1.5`, `null`} {
-		if _, err := deps.Pool.Exec(ctx, `UPDATE den_link SET bundle = jsonb_set(bundle, '{retention,revision_days}', $1::jsonb)`, bad); err != nil {
+		if _, err := deps.Pool.Exec(ctx, `UPDATE den_link SET bundle = jsonb_set(bundle, '{module_settings,data,retention,revision_days}', $1::jsonb)`, bad); err != nil {
 			t.Fatal(err)
 		}
 		if r, err := s.svc.RevisionRetention(ctx); err != nil || r.Source != "config" || r.Days != 30 {

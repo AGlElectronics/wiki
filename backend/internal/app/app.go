@@ -89,7 +89,10 @@ func Run(ctx context.Context, logger zerolog.Logger) error {
 	}
 
 	brandProvider := brand.New(cfg)
-	den := denlink.New(pool, denlink.Config{Slug: "wiki", Version: Version, InternalURL: cfg.DenInternalURL, Mode: cfg.DenMode}, logger)
+	den, err := denlink.Open(pool, cfg.DenConfig(Version), logger)
+	if err != nil {
+		return fmt.Errorf("den link: %w", err)
+	}
 	if err := den.Restore(ctx); err != nil {
 		logger.Warn().Err(err).Msg("den link: load failed")
 	}
@@ -100,6 +103,7 @@ func Run(ctx context.Context, logger zerolog.Logger) error {
 	// editing off (page tree and sharing still work).
 	svc := wiki.NewService(pool)
 	svc.SetRevisionRetentionDays(cfg.RevisionRetentionDays)
+	svc.SetGroupMatch(cfg.GroupMatch)
 	var liveMgr *live.Manager
 	var filesSvc *wiki.Files
 	filesCtx, cancelFiles := context.WithTimeout(ctx, 15*time.Second)

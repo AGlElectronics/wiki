@@ -570,8 +570,22 @@ func (s *Service) pageOrGone(ctx context.Context, c Caller, id uuid.UUID) (Page,
 // Shared lists pages shared with the caller (by person or group) in
 // spaces they cannot otherwise see, topmost first.
 func (s *Service) Shared(ctx context.Context, c Caller) ([]SharedPage, error) {
-	groups := groupKeys(c.Groups)
-	rows, err := s.pool.Query(ctx, `
+	// Group grants are matched in Go (prefix and last-segment modes cannot
+	// be expressed as SQL equality): the distinct group names first, then
+	// the spaces holding a grant to one of the matching ones.
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT principal FROM page_grants WHERE principal_kind = 'group'`)
+	if err != nil {
+		return nil, err
+	}
+	granted, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, err
+	}
+	groups := c.GroupMatch.Matching(c.Groups, granted)
+	if groups == nil {
+		groups = []string{}
+	}
+	rows, err = s.pool.Query(ctx, `
 		SELECT DISTINCT p.space_id FROM page_grants g JOIN pages p ON p.id = g.page_id
 		 WHERE (g.principal_kind = 'user' AND g.principal = $1)
 		    OR (g.principal_kind = 'group' AND g.principal = ANY($2))`, c.UserID.String(), groups)

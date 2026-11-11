@@ -73,6 +73,7 @@ func (h *wikiHandler) caller(r *http.Request, u *auth.User) (wiki.Caller, error)
 	return wiki.Caller{
 		UserID:       u.ID,
 		Groups:       u.Groups,
+		GroupMatch:   h.svc.GroupMatch(),
 		Admin:        u.HasInOrg(domain.PermWikiManage, orgID),
 		CreateSpaces: u.HasInOrg(domain.PermSpaceCreate, orgID),
 	}, nil

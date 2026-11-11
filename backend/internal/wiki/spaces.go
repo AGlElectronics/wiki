@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/AGlElectronics/wiki/backend/internal/domain"
+	"github.com/AGlElectronics/wiki/backend/internal/groupmatch"
 	"github.com/AGlElectronics/wiki/backend/internal/httperror"
 )
 
@@ -20,7 +21,15 @@ type Service struct {
 	onDeleted func([]uuid.UUID)
 	// retentionDays is WIKI_REVISION_RETENTION_DAYS (0 keeps everything).
 	retentionDays int
+	// groups is the shared group matching rule (OIDC_GROUP_*).
+	groups groupmatch.Config
 }
+
+// SetGroupMatch sets the group matching rule. Set it before serving.
+func (s *Service) SetGroupMatch(gm groupmatch.Config) { s.groups = gm }
+
+// GroupMatch is the group matching rule callers carry.
+func (s *Service) GroupMatch() groupmatch.Config { return s.groups }
 
 // NewService constructs the wiki service.
 func NewService(pool *pgxpool.Pool) *Service {
@@ -290,12 +299,13 @@ type GrantInput struct {
 	PrincipalKind string `json:"principal_kind"`
 	Principal     string `json:"principal"`
 	Level         string `json:"level"`
-	// display is the group name as typed; Principal becomes its groupKey.
+	// display is the group name as typed; Principal becomes its stored form.
 	display string
 }
 
 // validate checks the input and, for people, that they exist. A group name
-// is normalised (groupKey); the typed form is kept for display.
+// is stored normalised (groupmatch.NewGrant); the typed form is kept for
+// display.
 func (in *GrantInput) validate(ctx context.Context, q querier) (remove bool, err error) {
 	in.Principal = strings.TrimSpace(in.Principal)
 	switch in.PrincipalKind {
@@ -313,11 +323,11 @@ func (in *GrantInput) validate(ctx context.Context, q querier) (remove bool, err
 		}
 		in.Principal = id.String()
 	case domain.PrincipalGroup:
-		if groupKey(in.Principal) == "" || len(in.Principal) > 200 {
+		g := groupmatch.NewGrant(in.Principal)
+		if g.Stored == "" || len(in.Principal) > 200 {
 			return false, httperror.Validation("invalid grant", map[string]string{"principal": "a group name"})
 		}
-		in.display = in.Principal
-		in.Principal = groupKey(in.Principal)
+		in.Principal, in.display = g.Stored, g.Display
 	default:
 		return false, httperror.Validation("invalid grant", map[string]string{"principal_kind": "user or group"})
 	}

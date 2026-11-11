@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/AGlElectronics/wiki/backend/internal/domain"
+	"github.com/AGlElectronics/wiki/backend/internal/groupmatch"
 )
 
 const sampleAccess = `
@@ -80,29 +81,35 @@ group = "g"`,
 	}
 }
 
-func TestBindingsForNormalisesGroups(t *testing.T) {
+func TestBindingsForUsesGroupmatch(t *testing.T) {
 	cfg, err := parseAccessConfig([]byte(sampleAccess))
 	if err != nil {
 		t.Fatal(err)
 	}
+	full := groupmatch.Config{}
 	cases := []struct {
+		gm     groupmatch.Config
 		groups []string
 		roles  []string
 	}{
-		{[]string{"wiki-admin"}, []string{"organization_admin"}},
-		{[]string{"/WIKI-ADMIN"}, []string{"organization_admin"}},
-		{[]string{" wiki-editor "}, []string{"space_creator"}},
-		{[]string{"wiki-admin", "/wiki-editor"}, []string{"organization_admin", "space_creator"}},
-		{[]string{"someone-else"}, nil},
-		{nil, nil},
+		{full, []string{"wiki-admin"}, []string{"organization_admin"}},
+		{full, []string{"/WIKI-ADMIN"}, []string{"organization_admin"}},
+		{full, []string{" wiki-editor "}, []string{"space_creator"}},
+		{full, []string{"wiki-admin", "/wiki-editor"}, []string{"organization_admin", "space_creator"}},
+		{full, []string{"/teams/wiki-admin"}, nil},
+		{groupmatch.Config{Mode: groupmatch.ModeLast}, []string{"/teams/wiki-admin"}, []string{"organization_admin"}},
+		{groupmatch.Config{Prefix: "/con2026"}, []string{"/con2026/wiki-admin"}, []string{"organization_admin"}},
+		{groupmatch.Config{Prefix: "/con2026"}, []string{"/con2025/wiki-admin"}, nil},
+		{full, []string{"someone-else"}, nil},
+		{full, nil, nil},
 	}
 	for _, tc := range cases {
 		var got []string
-		for _, b := range cfg.BindingsFor(tc.groups) {
+		for _, b := range cfg.BindingsFor(tc.gm, tc.groups) {
 			got = append(got, b.Role)
 		}
 		if strings.Join(got, ",") != strings.Join(tc.roles, ",") {
-			t.Errorf("BindingsFor(%v) = %v, want %v", tc.groups, got, tc.roles)
+			t.Errorf("BindingsFor(%+v, %v) = %v, want %v", tc.gm, tc.groups, got, tc.roles)
 		}
 	}
 }
@@ -113,7 +120,7 @@ func TestDefaultAccessConfig(t *testing.T) {
 		t.Fatalf("default catalog: roles %v, bindings %v", cfg.Roles(), cfg.Bindings())
 	}
 	var nilCfg *AccessConfig
-	if nilCfg.HasRole("x") || nilCfg.BindingsFor([]string{"x"}) != nil || nilCfg.Roles() != nil {
+	if nilCfg.HasRole("x") || nilCfg.BindingsFor(groupmatch.Config{}, []string{"x"}) != nil || nilCfg.Roles() != nil {
 		t.Fatal("a nil config grants nothing")
 	}
 }

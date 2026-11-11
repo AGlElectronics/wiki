@@ -56,12 +56,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/hlog"
 
 	"github.com/AGlElectronics/wiki/backend/internal/auth"
+	"github.com/AGlElectronics/wiki/backend/internal/authbase"
 	"github.com/AGlElectronics/wiki/backend/internal/brand"
 	"github.com/AGlElectronics/wiki/backend/internal/clientip"
 	"github.com/AGlElectronics/wiki/backend/internal/config"
@@ -110,6 +110,17 @@ func groupSources(deps Deps) (hr, idp directory.Source) {
 	return hr, idp
 }
 
+// userKey is the signed-in person's (issuer, subject), for rate limits and
+// Den preferences.
+func userKey(r *http.Request) (authbase.UserKey, bool) {
+	u, ok := auth.FromContext(r.Context())
+	if !ok {
+		return authbase.UserKey{}, false
+	}
+	k := u.Key()
+	return k, !k.IsZero()
+}
+
 // timeoutExceptLive bounds request time, except for live editing
 // websockets, which stay open while a page is.
 func timeoutExceptLive(d time.Duration) func(http.Handler) http.Handler {
@@ -147,28 +158,28 @@ func NewRouter(deps Deps, version string) http.Handler {
 	}))
 	r.Use(hlog.RequestIDHandler("request_id", "X-Request-ID"))
 
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   deps.Config.CORSAllowedOrigins,
-		AllowedMethods:   []string{"GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Dev-User", "X-Dev-Groups", "X-Request-ID"},
-		ExposedHeaders:   []string{"X-Request-ID"},
-		AllowCredentials: true,
-		MaxAge:           300,
-	}))
+	// Shared hardening (authbase): API security headers on every response,
+	// dev identity headers removed unless AUTH_MODE=dev in development, and
+	// CORS that only lets dev headers through in dev mode.
+	authCfg := deps.Config.Auth()
+	r.Use(authbase.SecurityHeaders)
+	r.Use(authCfg.StripDevHeaders)
+	r.Use(authCfg.CORS(authbase.CORSOptions{AllowedOrigins: deps.Config.CORSAllowedOrigins}))
 
 	health := newHealthHandler(deps.Pool, version)
-	resolver := auth.NewResolver(deps.Pool, deps.Access)
+	resolver := auth.NewResolver(deps.Pool, deps.Access, deps.Config.GroupMatch)
 	authMW := auth.Middleware(deps.Config, resolver, deps.OIDCVerifier)
 
 	den := deps.Den
 	if den == nil {
-		den = denlink.New(deps.Pool, denlink.Config{Slug: "wiki", Version: version, Mode: deps.Config.DenMode}, deps.Logger)
+		den = denlink.New(deps.Pool, deps.Config.DenConfig(version), deps.Logger)
 	}
 	brandH := &brandHandler{provider: deps.Brand, den: den}
 	svc := deps.Wiki
 	if svc == nil {
 		svc = wiki.NewService(deps.Pool)
 		svc.SetRevisionRetentionDays(deps.Config.RevisionRetentionDays)
+		svc.SetGroupMatch(deps.Config.GroupMatch)
 	}
 	hrGroups, idpGroups := groupSources(deps)
 	wh := &wikiHandler{svc: svc, live: deps.Live, files: deps.Files, den: den, hrGroups: hrGroups, idpGroups: idpGroups}
@@ -181,20 +192,24 @@ func NewRouter(deps Deps, version string) http.Handler {
 	r.Route("/api", func(api chi.Router) {
 		api.Use(den.RequirePaired)
 		api.Get("/health", health.get)
-		api.Get("/role-catalog", roleCatalogHandler(deps.Access))
+		// HR's service token or a staff sign-in (role catalog contract).
+		api.Get("/role-catalog", roleCatalogAuth(deps.Config.HRServiceToken, authMW, roleCatalogHandler(deps.Access)))
 		api.Get("/den/state", den.StateHandler)
 
 		// Server-to-server (HR's offboarding hook); 404 without a token.
+		// Rate limited per client so a wrong token cannot be guessed fast.
 		internal := &internalHandler{svc: svc, token: deps.Config.ServiceToken}
-		api.Post("/internal/offboarded", internal.offboarded)
+		internalLimiter := authbase.NewRateLimiter(authbase.RateLimitOptions{Rate: 1, Burst: 20})
+		api.With(internalLimiter.Middleware).Post("/internal/offboarded", internal.offboarded)
 
 		// Public share links: read-only access for anyone with a link
-		// token, rate limited, never indexed. 404 unless switched on
-		// (Den's wiki_public_links setting, or PUBLIC_LINKS_ENABLED).
+		// token, rate limited per client IP (120 a minute, bursts of 30),
+		// never indexed. 404 unless switched on (Den's wiki_public_links
+		// setting, or PUBLIC_LINKS_ENABLED).
 		share := &shareHandler{svc: svc, live: deps.Live, cfg: deps.Config, den: den}
-		shareLimiter := newRateLimiter(120, 30)
+		shareLimiter := authbase.NewRateLimiter(authbase.RateLimitOptions{Rate: 2, Burst: 30})
 		api.Route("/public/v1/shares", func(pub chi.Router) {
-			pub.Use(shareLimiter.middleware)
+			pub.Use(shareLimiter.Middleware)
 			pub.Get("/{token}", share.get)
 			pub.Get("/{token}/pages/{page}/doc", share.doc)
 			pub.Get("/{token}/files/{file}", share.file)
@@ -213,11 +228,8 @@ func NewRouter(deps Deps, version string) http.Handler {
 				secure.Use(authMW)
 				secure.Get("/me", meHandler)
 				prefs := den.PreferencesHandler(func(r *http.Request) (string, string, bool) {
-					u, ok := auth.FromContext(r.Context())
-					if !ok || u.Issuer == "" || u.Subject == "" {
-						return "", "", false
-					}
-					return u.Issuer, u.Subject, true
+					k, ok := userKey(r)
+					return k.Issuer, k.Subject, ok
 				})
 				secure.Get("/me/preferences", prefs)
 				secure.Put("/me/preferences", prefs)
@@ -252,7 +264,9 @@ func NewRouter(deps Deps, version string) http.Handler {
 				secure.Put("/pages/{page}/restricted", wh.with(wh.setRestricted))
 				secure.Post("/pages/{page}/live-ticket", wh.with(wh.liveTicket))
 
-				secure.Post("/pages/{page}/files", wh.with(wh.uploadFile))
+				// Up to 50 MB each: a person gets 20 at once, then one a second.
+				uploadLimiter := authbase.NewRateLimiter(authbase.RateLimitOptions{Rate: 1, Burst: 20, Key: authbase.BySubject(userKey)})
+				secure.With(uploadLimiter.Middleware).Post("/pages/{page}/files", wh.with(wh.uploadFile))
 				secure.Get("/files/{file}", wh.downloadFile)
 
 				secure.Get("/pages/{page}/revisions", wh.with(wh.listRevisions))

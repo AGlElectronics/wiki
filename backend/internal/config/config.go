@@ -20,26 +20,32 @@ import (
 
 	"github.com/joho/godotenv"
 
+	"github.com/AGlElectronics/wiki/backend/internal/authbase"
 	"github.com/AGlElectronics/wiki/backend/internal/clientip"
 	"github.com/AGlElectronics/wiki/backend/internal/denlink"
+	"github.com/AGlElectronics/wiki/backend/internal/groupmatch"
 )
 
-// AuthMode selects how incoming requests are authenticated.
+// AuthMode selects how incoming requests are authenticated (authbase).
 //
 //   - AuthModeDev reads an X-Dev-User header (identity) and an X-Dev-Groups
 //     header (simulated IdP groups) and provisions a local user tied to the
-//     "dev" issuer. Only safe for local scaffolding and CI.
-//   - AuthModeOIDC verifies a Bearer JWT via the configured issuer.
-type AuthMode string
+//     "dev" issuer. Only allowed with APP_ENV=development.
+//   - AuthModeOIDC verifies a Bearer access token via the configured issuer.
+type AuthMode = authbase.AuthMode
 
 const (
-	AuthModeOIDC AuthMode = "oidc"
-	AuthModeDev  AuthMode = "dev"
+	AuthModeOIDC = authbase.AuthOIDC
+	AuthModeDev  = authbase.AuthDev
 )
+
+// DefaultAudience is OIDC_AUDIENCE when unset: the access token audience
+// Keycloak adds for Wiki's API (token contract).
+const DefaultAudience = "wiki-api"
 
 // Config is the validated process configuration.
 type Config struct {
-	// Core
+	// Core. AppEnv defaults to production; only "development" relaxes rules.
 	AppEnv     string
 	AppBaseURL string
 	HTTPAddr   string
@@ -55,14 +61,17 @@ type Config struct {
 	AccessConfigPath string
 	DevDefaultUser   string
 	DevDefaultGroups []string
+	// GroupMatch is OIDC_GROUPS_CLAIM, OIDC_GROUP_MATCH, OIDC_GROUP_PREFIX.
+	GroupMatch groupmatch.Config
+	// HRServiceToken lets HR read GET /api/role-catalog without a sign-in
+	// (HR_SERVICE_TOKEN). Empty: only signed-in staff may read it.
+	HRServiceToken string
 
 	// Brand provider
 	BrandLocalPath string // optional brand.json; Den's brand overlays it once paired
-	// DenInternalURL replaces the host of pasted Den pairing URLs (Docker).
-	DenInternalURL string
-	// DenMode is DEN_MODE: required keeps the API locked until the module
-	// is paired with Den; standalone (the default) does not.
-	DenMode denlink.Mode
+	// Den is the pairing configuration (DEN_MODE, DEN_INTERNAL_URL,
+	// DEN_ALLOWED_HOSTS, DEN_LINK_ENCRYPTION_KEY[_PREVIOUS], APP_ENV).
+	Den denlink.Config
 
 	// HTTP
 	CORSAllowedOrigins []string
@@ -114,6 +123,30 @@ type Config struct {
 // S3Enabled reports whether object storage is configured.
 func (c *Config) S3Enabled() bool { return strings.TrimSpace(c.S3Endpoint) != "" }
 
+// Auth is the authbase view of AUTH_MODE and APP_ENV.
+func (c *Config) Auth() authbase.Config {
+	return authbase.Config{AppEnv: c.AppEnv, AuthMode: c.AuthMode}
+}
+
+// Audience is the audience access tokens must carry.
+func (c *Config) Audience() string {
+	if c.OIDCAudience != "" {
+		return c.OIDCAudience
+	}
+	return DefaultAudience
+}
+
+// DenConfig is Den with the slug and version filled in, and APP_ENV taken
+// from the process when Den does not set its own.
+func (c *Config) DenConfig(version string) denlink.Config {
+	d := c.Den
+	d.Slug, d.Version = "wiki", version
+	if d.AppEnv == "" {
+		d.AppEnv = c.AppEnv
+	}
+	return d
+}
+
 // Load reads environment variables (plus an optional .env file) and returns
 // a validated Config. Required fields that are missing return an aggregated
 // error so operators see every problem at once instead of fixing one at a
@@ -121,8 +154,22 @@ func (c *Config) S3Enabled() bool { return strings.TrimSpace(c.S3Endpoint) != ""
 func Load() (*Config, error) {
 	_ = godotenv.Load()
 
+	var errs []string
+	auth, err := authbase.FromEnv(os.Getenv)
+	if err != nil {
+		errs = append(errs, err.Error())
+	}
+	groups, err := groupmatch.FromEnv(os.Getenv)
+	if err != nil {
+		errs = append(errs, err.Error())
+	}
+	den, err := denlink.FromEnv("wiki", "", os.Getenv)
+	if err != nil {
+		errs = append(errs, err.Error())
+	}
+
 	cfg := &Config{
-		AppEnv: getEnv("APP_ENV", "development"),
+		AppEnv: auth.AppEnv,
 		// Container-internal defaults: every module in the ecosystem binds
 		// :8080 inside its container. Host-side port mapping (host 8140 ->
 		// container 8080 for Wiki) is handled by docker-compose / K8s.
@@ -131,17 +178,18 @@ func Load() (*Config, error) {
 
 		DatabaseURL: getEnv("DATABASE_URL", ""),
 
-		AuthMode:         AuthMode(getEnv("AUTH_MODE", "dev")),
+		AuthMode:         auth.AuthMode,
 		OIDCIssuerURL:    getEnv("OIDC_ISSUER_URL", ""),
 		OIDCClientID:     getEnv("OIDC_CLIENT_ID", ""),
-		OIDCAudience:     getEnv("OIDC_AUDIENCE", ""),
+		OIDCAudience:     getEnv("OIDC_AUDIENCE", DefaultAudience),
 		AccessConfigPath: getEnv("ACCESS_CONFIG_PATH", ""),
 		DevDefaultUser:   getEnv("DEV_DEFAULT_USER", "dev-admin"),
 		DevDefaultGroups: splitCSV(getEnv("DEV_DEFAULT_GROUPS", "wiki-admin")),
+		GroupMatch:       groups,
+		HRServiceToken:   getEnv("HR_SERVICE_TOKEN", ""),
 
 		BrandLocalPath: getEnv("BRAND_LOCAL_PATH", ""),
-		DenInternalURL: getEnv("DEN_INTERNAL_URL", ""),
-		DenMode:        denlink.Mode(getEnv("DEN_MODE", string(denlink.ModeStandalone))),
+		Den:            den,
 
 		CORSAllowedOrigins: splitCSV(getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3007")),
 		ShutdownTimeout:    getEnvDuration("SHUTDOWN_TIMEOUT", 15*time.Second),
@@ -176,20 +224,15 @@ func Load() (*Config, error) {
 	}
 	cfg.TrustedProxyCIDRs = trusted
 
-	if err := cfg.validate(); err != nil {
+	if err := cfg.validate(errs); err != nil {
 		return nil, err
 	}
 	return cfg, nil
 }
 
-func (c *Config) validate() error {
-	var errs []string
-
+func (c *Config) validate(errs []string) error {
 	if c.DatabaseURL == "" {
 		errs = append(errs, "DATABASE_URL is required")
-	}
-	if err := c.DenMode.Validate(); err != nil {
-		errs = append(errs, err.Error())
 	}
 	if c.RevisionRetentionDays < 0 {
 		errs = append(errs, "WIKI_REVISION_RETENTION_DAYS must be 0 (keep every revision) or a number of days")
@@ -211,8 +254,7 @@ func (c *Config) validate() error {
 		}
 	case AuthModeDev:
 		// dev mode: no extra required fields; dev users auto-provision.
-	default:
-		errs = append(errs, fmt.Sprintf("AUTH_MODE must be 'oidc' or 'dev', got %q", c.AuthMode))
+		// authbase.FromEnv already refused it outside development.
 	}
 
 	if len(errs) > 0 {

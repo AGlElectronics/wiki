@@ -74,6 +74,26 @@ counts rebuilds of the same version. Rebuilds get no entry here.
   group name can still be typed in. `GET /api/v1/groups` now returns
   `{"groups":[{"name","display_name","kind"}],"source"}`. See
   [Configuration](https://aglelectronics.github.io/con-services/modules/wiki/configuration/#group-picker).
+- Uses the shared Con Services packages (copies of `con-services`
+  `shared/go`, see
+  [Shared code](https://aglelectronics.github.io/con-services/concepts/shared-code/)):
+  `groupmatch`, `denlink` and `authbase`.
+- Group matching follows the suite-wide rule: groups are read only from
+  `OIDC_GROUPS_CLAIM` (default `groups`; a dotted name such as
+  `realm_access.roles` is followed into nested claims), the `roles` claim is
+  never merged in, `OIDC_GROUP_MATCH` (`full` by default, or `last`) and
+  `OIDC_GROUP_PREFIX` (for example `/con2026`) apply to role bindings and to
+  space and page grants alike.
+- The Den connection shows when Den rejected Wiki's credential ("pair again
+  from Den"); `GET /api/den/state` and `GET /api/v1/den/` report `revoked`
+  (and `revoked_at`). Migration `20261117000001` adds `den_link.revoked_at`.
+  `DEN_ALLOWED_HOSTS` limits which hosts a pasted pairing URL may point at
+  when `DEN_INTERNAL_URL` is empty.
+- `GET /api/role-catalog` follows the 1.0 contract: it needs HR's
+  `HR_SERVICE_TOKEN` or a staff sign-in, carries `revision` (also the
+  `ETag`; `If-None-Match` answers `304`), and each role has `group` (stored,
+  normalised), `group_display`, `privileged` (`organization_admin` is),
+  `dynamic`, `default` and `scope: "organization"`.
 - `TRUSTED_PROXY_CIDRS` (optional): comma-separated CIDRs of the proxies in
   front of the backend whose `X-Forwarded-For` entries are believed. The
   default, `10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128,fc00::/7`,
@@ -142,6 +162,30 @@ counts rebuilds of the same version. Rebuilds get no entry here.
   HTML and every other file download as an attachment. Every download,
   including through public share links, carries
   `Content-Security-Policy: sandbox` and `X-Content-Type-Options: nosniff`.
+- Safe defaults: `AUTH_MODE` defaults to `oidc` and `APP_ENV` to
+  `production`; `AUTH_MODE=dev` stops the backend unless
+  `APP_ENV=development`. Outside dev mode the `X-Dev-User` and
+  `X-Dev-Groups` headers are removed from every request and are not allowed
+  through CORS. Local setups (`.env.example`, Compose) set
+  `APP_ENV=development` explicitly.
+- The stored Den credential is encrypted with `DEN_LINK_ENCRYPTION_KEY`
+  (AES-256-GCM; required unless `APP_ENV=development`;
+  `DEN_LINK_ENCRYPTION_KEY_PREVIOUS` for rotation). A credential stored in
+  plain text is encrypted on the first read.
+- The API checks **access tokens** for its own audience (`OIDC_AUDIENCE`,
+  default `wiki-api`, added by a Keycloak audience mapper on `wiki-spa`) and
+  refuses ID tokens. The web app keeps tokens in memory only, never in
+  `localStorage`, and signs in again silently after a reload.
+- Every API response carries `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` and
+  `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`
+  (file downloads keep `sandbox`). JSON request bodies are limited to 1 MiB
+  (`413 request_too_large`). Rate limits: public share links 120 a minute
+  per client (bursts of 30), the offboarding hook 60 a minute per client,
+  uploads 60 a minute per person (bursts of 20); over the limit answers
+  `429 rate_limited` with `Retry-After`.
+- The web app's nginx sends the shared security headers (Content Security
+  Policy, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`).
 - The people picker shows email addresses only to wiki admins, and only
   they can search people by email; everyone else sees names. The group
   picker no longer lists every group seen on anyone's sign-in.

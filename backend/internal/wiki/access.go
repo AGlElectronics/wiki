@@ -21,8 +21,6 @@ package wiki
 import (
 	"context"
 	"errors"
-	"slices"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -30,6 +28,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/AGlElectronics/wiki/backend/internal/domain"
+	"github.com/AGlElectronics/wiki/backend/internal/groupmatch"
 	"github.com/AGlElectronics/wiki/backend/internal/httperror"
 )
 
@@ -38,6 +37,9 @@ type Caller struct {
 	UserID uuid.UUID
 	// Groups are the IdP groups of the current token.
 	Groups []string
+	// GroupMatch compares Groups with group grants (the zero value matches
+	// full paths with no prefix).
+	GroupMatch groupmatch.Config
 	// Admin holds wiki.manage.
 	Admin bool
 	// CreateSpaces holds space.create.
@@ -53,39 +55,25 @@ type querier interface {
 // Grant gives a person or an IdP group a level on a space or page.
 type Grant struct {
 	PrincipalKind string `json:"principal_kind"`
-	// Principal is the person's id, or the normalised group name (groupKey).
+	// Principal is the person's id, or the stored group name (groupmatch).
 	Principal string       `json:"principal"`
 	Level     domain.Level `json:"level"`
 	// DisplayName is the person's name, or the group name as it was typed.
 	DisplayName string `json:"display_name"`
 }
 
-// groupKey is the form group grants are stored and matched in: trimmed,
-// one leading "/" removed (Keycloak's full-path form), lower-cased. Full
-// paths stay full paths, so "/org/dept-x" never matches a plain "dept-x".
-// Migration 20261114000001 applies the same rule in SQL.
-// TODO(shared/groupmatch): replace with the suite-wide function once it lands.
-func groupKey(g string) string {
-	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(g), "/"))
-}
-
-// groupKeys normalises a token's groups for matching against grants.
-func groupKeys(groups []string) []string {
-	out := make([]string, 0, len(groups))
-	for _, g := range groups {
-		if k := groupKey(g); k != "" {
-			out = append(out, k)
-		}
-	}
-	return out
-}
+// Group grants are stored as groupmatch.NewGrant(name).Stored (trimmed, one
+// leading "/" removed, lower-cased) with the typed name for display, and
+// compared with the shared rule (groupmatch: OIDC_GROUP_MATCH full by
+// default, OIDC_GROUP_PREFIX). Migration 20261114000001 normalised the
+// grants made before.
 
 func (g Grant) matches(c Caller) bool {
 	switch g.PrincipalKind {
 	case domain.PrincipalUser:
 		return g.Principal == c.UserID.String()
 	case domain.PrincipalGroup:
-		return slices.ContainsFunc(c.Groups, func(have string) bool { return groupKey(have) == g.Principal })
+		return c.GroupMatch.Match(c.Groups, g.Principal)
 	}
 	return false
 }

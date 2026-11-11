@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/AGlElectronics/wiki/backend/internal/authbase"
 	"github.com/AGlElectronics/wiki/backend/internal/clientip"
 )
 
@@ -15,7 +16,8 @@ func TestRateLimitIgnoresForgedForwardedFor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := clientip.Middleware(trusted)(newRateLimiter(60, 3).middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})))
+	limiter := authbase.NewRateLimiter(authbase.RateLimitOptions{Rate: 1, Burst: 3})
+	h := clientip.Middleware(trusted)(limiter.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})))
 
 	var limited bool
 	for i := range 10 {

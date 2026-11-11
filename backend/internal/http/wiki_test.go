@@ -120,7 +120,7 @@ func setupDeps(t *testing.T) httpx.Deps {
 	}
 
 	cfg := &config.Config{
-		AppEnv:         "test",
+		AppEnv:         "development",
 		HTTPAddr:       ":0",
 		DatabaseURL:    dsn,
 		AuthMode:       config.AuthModeDev,

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/AGlElectronics/wiki/backend/internal/config"
+	"github.com/AGlElectronics/wiki/backend/internal/groupmatch"
 )
 
 // fakeIssuer is an OpenID provider with discovery and a JWKS that signs
@@ -78,14 +79,16 @@ func (f *fakeIssuer) token(t *testing.T, claims map[string]any) string {
 func TestOIDCVerify(t *testing.T) {
 	f := newFakeIssuer(t)
 	ctx := context.Background()
+	// No OIDC_AUDIENCE: access tokens must carry the default wiki-api.
 	v, err := NewOIDCVerifier(ctx, &config.Config{OIDCIssuerURL: f.srv.URL, OIDCClientID: "wiki-spa"})
 	if err != nil {
 		t.Fatalf("verifier: %v", err)
 	}
 
 	claims, err := v.Verify(ctx, f.token(t, map[string]any{
-		"sub": "kc-123", "aud": "wiki-spa", "email": "sam@example.org", "nickname": "Sam",
-		"groups": []string{"/dept-security", "wiki-editor"}, "roles": []string{"wiki-editor", "offline_access"},
+		"sub": "kc-123", "aud": []string{"wiki-api", "account"}, "typ": "Bearer", "azp": "wiki-spa",
+		"email": "sam@example.org", "nickname": "Sam",
+		"groups": []string{"/dept-security", "wiki-editor"}, "roles": []string{"wiki-admin", "offline_access"},
 	}))
 	if err != nil {
 		t.Fatalf("verify: %v", err)
@@ -93,9 +96,8 @@ func TestOIDCVerify(t *testing.T) {
 	if claims.Subject != "kc-123" || claims.Issuer != f.srv.URL || claims.Email != "sam@example.org" {
 		t.Fatalf("claims = %+v", claims)
 	}
-	// Current behaviour (until the suite-wide OIDC_GROUPS_CLAIM): roles are
-	// merged into groups, without duplicates.
-	if strings.Join(claims.Groups, ",") != "/dept-security,wiki-editor,offline_access" {
+	// Groups come only from OIDC_GROUPS_CLAIM; "roles" is never merged in.
+	if strings.Join(claims.Groups, ",") != "/dept-security,wiki-editor" {
 		t.Fatalf("groups = %v", claims.Groups)
 	}
 	if got := displayNameFromClaims(claims); got != "Sam" {
@@ -103,19 +105,21 @@ func TestOIDCVerify(t *testing.T) {
 	}
 
 	bad := map[string]map[string]any{
-		"wrong audience":  {"sub": "kc-1", "aud": "other-spa"},
-		"expired":         {"sub": "kc-1", "aud": "wiki-spa", "exp": time.Now().Add(-time.Hour).Unix()},
-		"another issuer":  {"sub": "kc-1", "aud": "wiki-spa", "iss": "https://evil.example.org"},
-		"missing subject": {"aud": "wiki-spa"},
+		"ID token (audience is the client)": {"sub": "kc-1", "aud": "wiki-spa", "typ": "ID"},
+		"ID token with the API audience":    {"sub": "kc-1", "aud": "wiki-api", "typ": "ID"},
+		"another API's token":               {"sub": "kc-1", "aud": "hr-api", "typ": "Bearer"},
+		"expired":                           {"sub": "kc-1", "aud": "wiki-api", "exp": time.Now().Add(-time.Hour).Unix()},
+		"another issuer":                    {"sub": "kc-1", "aud": "wiki-api", "iss": "https://evil.example.org"},
+		"missing subject":                   {"aud": "wiki-api"},
 	}
 	for name, c := range bad {
 		if _, err := v.Verify(ctx, f.token(t, c)); err == nil {
 			t.Errorf("%s: token accepted", name)
 		}
 	}
-	tampered := f.token(t, map[string]any{"sub": "kc-1", "aud": "wiki-spa"})
+	tampered := f.token(t, map[string]any{"sub": "kc-1", "aud": "wiki-api"})
 	parts := strings.Split(tampered, ".")
-	parts[1] = b64([]byte(`{"sub":"admin","aud":"wiki-spa","iss":"` + f.srv.URL + `","exp":9999999999}`))
+	parts[1] = b64([]byte(`{"sub":"admin","aud":"wiki-api","iss":"` + f.srv.URL + `","exp":9999999999}`))
 	if _, err := v.Verify(ctx, strings.Join(parts, ".")); err == nil {
 		t.Error("a token with a changed payload was accepted")
 	}
@@ -123,19 +127,23 @@ func TestOIDCVerify(t *testing.T) {
 		t.Error("an empty bearer was accepted")
 	}
 
-	// OIDC_AUDIENCE overrides the client id as the expected audience.
-	va, err := NewOIDCVerifier(ctx, &config.Config{OIDCIssuerURL: f.srv.URL, OIDCClientID: "wiki-spa", OIDCAudience: "wiki-api"})
+	// OIDC_AUDIENCE and OIDC_GROUPS_CLAIM are configurable.
+	gm := groupmatch.Config{Claim: "realm_access.roles"}
+	va, err := NewOIDCVerifier(ctx, &config.Config{OIDCIssuerURL: f.srv.URL, OIDCClientID: "wiki-spa", OIDCAudience: "wiki-internal", GroupMatch: gm})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := va.Verify(ctx, f.token(t, map[string]any{"sub": "kc-1", "aud": "wiki-api"})); err != nil {
-		t.Errorf("audience wiki-api: %v", err)
+	c2, err := va.Verify(ctx, f.token(t, map[string]any{
+		"sub": "kc-1", "aud": "wiki-internal", "groups": []string{"ignored"},
+		"realm_access": map[string]any{"roles": []string{"wiki-admin"}},
+	}))
+	if err != nil || strings.Join(c2.Groups, ",") != "wiki-admin" {
+		t.Errorf("custom claim: groups %v, err %v", c2, err)
 	}
 	if _, err := NewOIDCVerifier(ctx, &config.Config{}); err == nil {
 		t.Error("a verifier without issuer and client id must fail")
 	}
 }
-
 func TestDisplayNameFallbacks(t *testing.T) {
 	cases := []struct {
 		c    OIDCClaims

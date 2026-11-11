@@ -19,6 +19,7 @@ import (
 
 	"github.com/AGlElectronics/wiki/backend/internal/config"
 	"github.com/AGlElectronics/wiki/backend/internal/domain"
+	"github.com/AGlElectronics/wiki/backend/internal/groupmatch"
 	"github.com/AGlElectronics/wiki/backend/migrations"
 )
 
@@ -66,7 +67,7 @@ organization = "no-such-org"
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := NewResolver(pool, access)
+	r := NewResolver(pool, access, groupmatch.Config{})
 	ctx := context.Background()
 	const demoOrg = "00000000-0000-0000-0000-000000000010"
 
@@ -142,7 +143,7 @@ func TestMiddlewareOIDC(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := Middleware(cfg, NewResolver(pool, access), v)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := Middleware(cfg, NewResolver(pool, access, groupmatch.Config{}), v)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u, err := MustFromContext(r.Context())
 		if err != nil {
 			t.Error("handler reached without a user")
@@ -172,7 +173,10 @@ func TestMiddlewareOIDC(t *testing.T) {
 	if rec := do("Bearer " + f.token(t, map[string]any{"sub": "kc-1", "aud": "someone-else"})); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("wrong audience: %d", rec.Code)
 	}
-	rec := do("Bearer " + f.token(t, map[string]any{"sub": "kc-1", "aud": "wiki-spa", "groups": []string{"wiki-admin"}}))
+	if rec := do("Bearer " + f.token(t, map[string]any{"sub": "kc-1", "aud": "wiki-spa", "typ": "ID", "groups": []string{"wiki-admin"}})); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("an ID token must be refused: %d", rec.Code)
+	}
+	rec := do("Bearer " + f.token(t, map[string]any{"sub": "kc-1", "aud": "wiki-api", "typ": "Bearer", "groups": []string{"wiki-admin"}}))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("valid token: %d %s", rec.Code, rec.Body.String())
 	}

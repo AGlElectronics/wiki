@@ -87,7 +87,7 @@ func TestGroupPickerSources(t *testing.T) {
 	if _, err := deps.Pool.Exec(ctx, `INSERT INTO den_link (den_base_url, credential, bundle) VALUES ('https://den.test', 'cred', '{"brand":{},"settings":{"data":{}}}')`); err != nil {
 		t.Fatalf("pair: %v", err)
 	}
-	den := denlink.New(deps.Pool, denlink.Config{Slug: "wiki", Mode: denlink.ModeStandalone}, zerolog.Nop())
+	den := denlink.New(deps.Pool, denlink.Config{Slug: "wiki", Mode: denlink.ModeStandalone, AppEnv: "development"}, zerolog.Nop())
 	if err := den.Restore(ctx); err != nil || !den.Paired() {
 		t.Fatalf("restore pairing: paired %v, err %v", den.Paired(), err)
 	}

@@ -6,7 +6,7 @@ import (
 )
 
 func TestLoadValidatesDirectoriesAndRetention(t *testing.T) {
-	base := map[string]string{"DATABASE_URL": "postgres://x", "AUTH_MODE": "dev"}
+	base := map[string]string{"DATABASE_URL": "postgres://x", "AUTH_MODE": "dev", "APP_ENV": "development"}
 	cases := []struct {
 		name string
 		env  map[string]string
@@ -42,4 +42,65 @@ func TestLoadValidatesDirectoriesAndRetention(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSafeDefaults: without AUTH_MODE and APP_ENV the backend runs OIDC in
+// production; dev sign-in and a missing Den key are refused outside
+// development (authbase, denlink).
+func TestSafeDefaults(t *testing.T) {
+	clear := func(t *testing.T) {
+		for _, k := range []string{"AUTH_MODE", "APP_ENV", "OIDC_ISSUER_URL", "OIDC_CLIENT_ID", "OIDC_AUDIENCE",
+			"DEN_LINK_ENCRYPTION_KEY", "DEN_MODE", "OIDC_GROUPS_CLAIM", "OIDC_GROUP_MATCH", "OIDC_GROUP_PREFIX", "HR_SERVICE_TOKEN"} {
+			t.Setenv(k, "")
+		}
+		t.Setenv("DATABASE_URL", "postgres://x")
+	}
+	key := "ZGV2LW9ubHktd2lraS1kZW4tbGluay1rZXktMDAwMDA=" // 32 bytes, dev only
+
+	t.Run("production oidc", func(t *testing.T) {
+		clear(t)
+		t.Setenv("OIDC_ISSUER_URL", "https://auth.example.org/realms/c")
+		t.Setenv("OIDC_CLIENT_ID", "wiki-spa")
+		t.Setenv("DEN_LINK_ENCRYPTION_KEY", key)
+		t.Setenv("OIDC_GROUP_MATCH", "last")
+		t.Setenv("OIDC_GROUP_PREFIX", "/con2026")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.AppEnv != "production" || cfg.AuthMode != AuthModeOIDC || cfg.Audience() != "wiki-api" {
+			t.Fatalf("defaults: env %q, mode %q, audience %q", cfg.AppEnv, cfg.AuthMode, cfg.Audience())
+		}
+		if cfg.GroupMatch.ClaimName() != "groups" || cfg.GroupMatch.Mode != "last" || cfg.GroupMatch.Prefix != "/con2026" {
+			t.Fatalf("group match = %+v", cfg.GroupMatch)
+		}
+		if d := cfg.DenConfig("1.0.0"); d.Slug != "wiki" || d.Version != "1.0.0" || d.EncryptionKey != key {
+			t.Fatalf("den config = %+v", d)
+		}
+	})
+	t.Run("dev refused in production", func(t *testing.T) {
+		clear(t)
+		t.Setenv("AUTH_MODE", "dev")
+		t.Setenv("DEN_LINK_ENCRYPTION_KEY", key)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "AUTH_MODE=dev") {
+			t.Fatalf("want the AUTH_MODE=dev refusal, got %v", err)
+		}
+	})
+	t.Run("den key required in production", func(t *testing.T) {
+		clear(t)
+		t.Setenv("OIDC_ISSUER_URL", "https://auth.example.org/realms/c")
+		t.Setenv("OIDC_CLIENT_ID", "wiki-spa")
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "DEN_LINK_ENCRYPTION_KEY") {
+			t.Fatalf("want the DEN_LINK_ENCRYPTION_KEY refusal, got %v", err)
+		}
+	})
+	t.Run("bad group match", func(t *testing.T) {
+		clear(t)
+		t.Setenv("APP_ENV", "development")
+		t.Setenv("AUTH_MODE", "dev")
+		t.Setenv("OIDC_GROUP_MATCH", "fuzzy")
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "OIDC_GROUP_MATCH") {
+			t.Fatalf("want the OIDC_GROUP_MATCH error, got %v", err)
+		}
+	})
 }

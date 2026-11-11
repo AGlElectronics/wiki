@@ -3,12 +3,12 @@ package http
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/AGlElectronics/wiki/backend/internal/authbase"
 	"github.com/AGlElectronics/wiki/backend/internal/httperror"
 )
 
@@ -24,19 +24,21 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-// decodeJSON strict-decodes the request body into dst and returns a
-// typed BadRequest on malformed input so handlers can hand the error
-// straight to httperror.Render.
+// maxJSONBody bounds every JSON request body. The largest legitimate one
+// is a comment (64 KB) or a database row's values; uploads are multipart
+// and live edits travel over the websocket.
+const maxJSONBody = authbase.DefaultMaxBodyBytes
+
+// decodeJSON strict-decodes the request body into dst with the shared
+// decoder (size limit, unknown fields refused) and returns a typed error
+// handlers can hand straight to httperror.Render: 400, 413 or 415.
 func decodeJSON(r *http.Request, dst any) error {
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(dst); err != nil {
-		if errors.Is(err, io.EOF) {
-			return httperror.BadRequest("request body is empty")
-		}
-		return httperror.BadRequest("invalid JSON: " + err.Error())
+	err := authbase.DecodeJSON(nil, r, dst, authbase.DecodeOptions{MaxBytes: maxJSONBody, DisallowUnknownFields: true})
+	var de *authbase.DecodeError
+	if errors.As(err, &de) {
+		return httperror.New(httperror.Code(de.Code), de.Message).WithCause(err)
 	}
-	return nil
+	return err
 }
 
 // chiParam returns a raw chi URL parameter.
