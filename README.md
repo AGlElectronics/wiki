@@ -20,11 +20,14 @@ cursors and avatars, read-only for view access. On top of that:
 - **Files:** image and file blocks uploaded through the backend (25 MB
   images, 50 MB files), downloads behind the page access check.
 - **History:** automatic revisions (at most one per 10 minutes of
-  editing), read-only preview, restore (open editors reload).
+  editing), read-only preview, restore (open editors reload). Kept
+  forever unless `WIKI_REVISION_RETENTION_DAYS` (or Den's module
+  settings) sets a number of days.
 - **Search and links:** Ctrl+K search over titles and page text,
   `@person` / `@page` mentions, a backlinks panel, favourites.
-- **Comments:** inline discussion threads with replies, resolve and emoji
-  reactions; the `comment` access level writes them without being able to
+- **Comments:** inline threads on a piece of text (edit access) and
+  page-level discussions (comment access), with replies, resolve and emoji
+  reactions; the `comment` level replies to both without being able to
   edit the page.
 - **Public share links:** read-only page (plus sub-pages) for anyone with
   the URL, switched per organisation (Den setting `wiki_public_links`,
@@ -111,8 +114,12 @@ rename and delete).
 - Trashing needs full access, or edit access on a page you created.
   Deleting forever needs full access.
 
-Group grants match the `groups` claim on the token, so removing someone
-from a Keycloak group revokes that access on their next request.
+Group grants match the `groups` claim on the token, ignoring case and a
+leading `/` (a nested group keeps its full path), so removing someone from
+a Keycloak group revokes that access on their next request. The share
+dialog's group picker lists HR's departments and access groups (paired
+with Den), the IdP's groups (standalone) or your own groups; any name can
+be typed in.
 
 ## Run it
 
@@ -163,3 +170,7 @@ links and the offboarding hook.
   leave it empty to turn the internal API off.
 - Public share links stay off until Den's `wiki_public_links` setting (or
   `PUBLIC_LINKS_ENABLED` standalone) switches them on.
+- Uploads other than PNG, JPEG, GIF and WebP always download as sandboxed
+  attachments, so an uploaded SVG or HTML file cannot run script.
+- Every setting is on the
+  [configuration page](https://aglelectronics.github.io/con-services/modules/wiki/configuration/).

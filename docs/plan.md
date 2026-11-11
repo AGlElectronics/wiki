@@ -147,8 +147,10 @@ replicas, that can become a shared log (Postgres or Redis Streams) without
 touching the websocket protocol or the S3 layout.
 
 Revisions: at most one every 10 minutes of editing per page, plus one
-before every restore. Keep all of them in the first slice; add a retention
-setting later.
+before every restore. Kept forever by default; `WIKI_REVISION_RETENTION_DAYS`
+(or Den's module settings, `retention.revision_days` in the integration
+bundle) deletes revisions older than N days, hourly, S3 object first and
+then the row.
 
 ## Access model
 
@@ -182,7 +184,10 @@ Page access:
   cache only if it gets slow.
 - Group grants use the `groups` claim of the token on every request, so
   removing someone from a Keycloak group revokes access on their next
-  request, same as every other module.
+  request, same as every other module. Names are compared trimmed,
+  lower-cased and without one leading `/`; full paths stay full paths
+  (`groupKey` in `internal/wiki/access.go`, to be replaced by the
+  suite-wide `shared/groupmatch`).
 - Pages without view access return 404 (never 403 confirming they exist),
   same rule as Learn's unpublished courses. Search, backlinks and the
   sidebar filter by the same check.
@@ -326,7 +331,7 @@ would contain the page tree but no page content.
 ## Still out
 
 - Notion import, PDF export.
-- Revision retention limits, per-space storage quotas.
+- Per-space storage quotas.
 - Linking from Learn courses or Rally events into wiki pages.
 - Reusing the attendees realm for signed-in external guests.
 
@@ -342,9 +347,32 @@ would contain the page tree but no page content.
 - **No offline editing** (WIKI-14): edits made while disconnected are kept
   only in the open tab and sent on reconnect. Persisting them in IndexedDB
   (`y-indexeddb`) is not needed.
+- **Websockets on Kubernetes** (was an open question): settled by the Helm
+  chart `deploy/charts/wiki` in `con-services`. The web app's nginx
+  forwards `^/api/v1/pages/[^/]+/live$` with the upgrade headers and a
+  1-hour read timeout, and the HTTPRoute has a separate websocket rule
+  without a request timeout (`route.websocketTimeout: 0s`). Production S3
+  is any S3-compatible service (`S3_ENDPOINT`); the chart's defaults point
+  at the platform's Garage.
+- **Uploads** (review R4): only PNG, JPEG, GIF and WebP whose bytes match
+  render inline; SVG, HTML and every other file download as attachments
+  with `Content-Security-Policy: sandbox` and `nosniff`.
+- **Comment level and inline threads** (review R10): an inline thread's
+  anchor is a mark in the Yjs document, and the relay drops document
+  updates below edit level without decoding them (ADR 0001). So anchored
+  threads need edit access; comment level starts page-level discussions
+  (`anchored: false`) and replies, resolves and reacts in both kinds.
+  Revisit only if the server ever decodes documents (Yrs fallback above).
+- **Share dialog privacy** (review R5): only wiki admins see and search
+  email addresses. Groups come from HR (departments and access groups,
+  `GET /api/internal/directory/groups`, while paired with Den), else from
+  the IdP's admin API, else the caller's own groups; free text always
+  works.
+- **Offboarding identity** (review R3, R9): the hook matches on issuer and
+  subject (subject alone, logged, when HR sends no issuer). The sweep, page
+  deletion and space deletion delete rows and queue S3 content
+  (`content_deletions`) in one transaction; the queue is retried hourly.
 
 ## Open questions
 
-- Production: managed S3 in place of MinIO; live editing needs websocket
-  support on the ingress (check the Kubernetes manifests used for Den and
-  Rally).
+None at the moment.
