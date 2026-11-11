@@ -179,6 +179,7 @@ func NewRouter(deps Deps, version string) http.Handler {
 	if svc == nil {
 		svc = wiki.NewService(deps.Pool)
 		svc.SetRevisionRetentionDays(deps.Config.RevisionRetentionDays)
+		svc.SetModuleSettings(den.ModuleSettings)
 		svc.SetGroupMatch(deps.Config.GroupMatch)
 	}
 	hrGroups, idpGroups := groupSources(deps)

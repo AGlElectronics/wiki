@@ -8,6 +8,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
+
+	"github.com/AGlElectronics/wiki/backend/internal/denlink"
 )
 
 // TestRevisionRetention: revisions older than the retention go (object
@@ -74,15 +77,28 @@ func TestRevisionRetention(t *testing.T) {
 		t.Fatalf("prune with 0 = %d, %v; want nothing", n, err)
 	}
 
-	// Den's module settings win once paired.
+	// Den's module settings win once paired. They come from the bundle the
+	// Den link stored, so they are there after a restart (Restore).
+	den := denlink.New(deps.Pool, deps.Config.DenConfig("test"), zerolog.Nop())
+	s.svc.SetModuleSettings(den.ModuleSettings)
+	if r := s.svc.RevisionRetention(); r.Source != "config" || r.Days != 30 {
+		t.Fatalf("standalone retention = %+v, want the local 30", r)
+	}
 	if _, err := deps.Pool.Exec(ctx, `
 		INSERT INTO den_link (den_base_url, credential, bundle)
 		VALUES ('https://den.test', 'cred', '{"brand":{},"settings":{"data":{}},"module_settings":{"data":{"wiki":{"revision_retention_days":7}}}}')`); err != nil {
 		t.Fatalf("pair: %v", err)
 	}
-	retention, err := s.svc.RevisionRetention(ctx)
-	if err != nil || retention.Days != 7 || retention.Source != "den" {
-		t.Fatalf("retention = %+v, %v; want 7 from den", retention, err)
+	restore := func() {
+		t.Helper()
+		if err := den.Restore(ctx); err != nil {
+			t.Fatalf("restore: %v", err)
+		}
+	}
+	restore()
+	retention := s.svc.RevisionRetention()
+	if retention.Days != 7 || retention.Source != "den" {
+		t.Fatalf("retention = %+v; want 7 from den", retention)
 	}
 	code, body = call(t, h, editor, "GET", "/api/v1/pages/"+page+"/revisions", nil)
 	mustStatus(t, code, 200, "list revisions (paired)")
@@ -98,9 +114,19 @@ func TestRevisionRetention(t *testing.T) {
 		if _, err := deps.Pool.Exec(ctx, `UPDATE den_link SET bundle = jsonb_set(bundle, '{module_settings,data,wiki,revision_retention_days}', $1::jsonb)`, bad); err != nil {
 			t.Fatal(err)
 		}
-		if r, err := s.svc.RevisionRetention(ctx); err != nil || r.Source != "config" || r.Days != 30 {
-			t.Fatalf("Den value %s: retention = %+v, %v; want the local 30", bad, r, err)
+		restore()
+		if r := s.svc.RevisionRetention(); r.Source != "config" || r.Days != 30 {
+			t.Fatalf("Den value %s: retention = %+v; want the local 30", bad, r)
 		}
+	}
+
+	// A bundle stored by an older Den, without the "data" wrapper, counts too.
+	if _, err := deps.Pool.Exec(ctx, `UPDATE den_link SET bundle = jsonb_set(bundle, '{module_settings}', '{"wiki":{"revision_retention_days":14},"updated_at":"2026-11-11T09:30:00Z"}'::jsonb)`); err != nil {
+		t.Fatal(err)
+	}
+	restore()
+	if r := s.svc.RevisionRetention(); r.Source != "den" || r.Days != 14 {
+		t.Fatalf("flat module settings: retention = %+v; want 14 from den", r)
 	}
 
 	// A revision whose object cannot be removed keeps its row (retried on

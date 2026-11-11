@@ -103,6 +103,7 @@ func Run(ctx context.Context, logger zerolog.Logger) error {
 	// editing off (page tree and sharing still work).
 	svc := wiki.NewService(pool)
 	svc.SetRevisionRetentionDays(cfg.RevisionRetentionDays)
+	svc.SetModuleSettings(den.ModuleSettings)
 	svc.SetGroupMatch(cfg.GroupMatch)
 	var liveMgr *live.Manager
 	var filesSvc *wiki.Files
@@ -195,10 +196,7 @@ func maintain(ctx context.Context, svc *wiki.Service, liveMgr *live.Manager, cfg
 	if liveMgr == nil {
 		return
 	}
-	retention, err := svc.RevisionRetention(sctx)
-	if err != nil {
-		logger.Warn().Err(err).Msg("could not read Den's revision retention; using WIKI_REVISION_RETENTION_DAYS")
-	}
+	retention := svc.RevisionRetention()
 	if n, err := liveMgr.PruneRevisions(sctx, retention.Days); err != nil {
 		logger.Warn().Err(err).Msg("revision retention failed; retrying next hour")
 	} else if n > 0 {

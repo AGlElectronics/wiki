@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/AGlElectronics/wiki/backend/internal/denlink"
 	"github.com/AGlElectronics/wiki/backend/internal/domain"
 	"github.com/AGlElectronics/wiki/backend/internal/groupmatch"
 	"github.com/AGlElectronics/wiki/backend/internal/httperror"
@@ -21,6 +22,8 @@ type Service struct {
 	onDeleted func([]uuid.UUID)
 	// retentionDays is WIKI_REVISION_RETENTION_DAYS (0 keeps everything).
 	retentionDays int
+	// moduleSettings returns Den's module settings (nil when standalone).
+	moduleSettings func() *denlink.ModuleSettings
 	// groups is the shared group matching rule (OIDC_GROUP_*).
 	groups groupmatch.Config
 }

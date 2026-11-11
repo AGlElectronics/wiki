@@ -377,10 +377,10 @@ func (h *wikiHandler) listRevisions(r *http.Request, c wiki.Caller) (int, any, e
 	if err != nil {
 		return 0, nil, err
 	}
-	retention, err := h.svc.RevisionRetention(r.Context())
+	retention := h.svc.RevisionRetention()
 	return ok(map[string]any{
 		"revisions": revs, "retention_days": retention.Days, "retention_source": retention.Source,
-	}, err)
+	}, nil)
 }
 
 // revisionBytes streams one revision's Yjs document for the read-only

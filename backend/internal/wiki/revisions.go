@@ -2,13 +2,12 @@ package wiki
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"math"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/AGlElectronics/wiki/backend/internal/denlink"
 )
 
 // Revision is one entry in a page's history. The document bytes live in
@@ -36,28 +35,22 @@ type Retention struct {
 // Set it before serving requests.
 func (s *Service) SetRevisionRetentionDays(days int) { s.retentionDays = days }
 
+// SetModuleSettings sets where Den's module settings come from, normally
+// the Den link's ModuleSettings method. Set it before serving requests.
+func (s *Service) SetModuleSettings(settings func() *denlink.ModuleSettings) {
+	s.moduleSettings = settings
+}
+
 // RevisionRetention is Den's module setting wiki.revision_retention_days
-// (module_settings.data in the integration bundle stored with the pairing,
-// docs/concepts/module-settings.md), when Den sends a whole number of days
-// (0 or more); otherwise the local setting. The shared denlink.Bundle has
-// no module_settings field yet, so the stored bundle is read directly.
-func (s *Service) RevisionRetention(ctx context.Context) (Retention, error) {
-	local := Retention{Days: s.retentionDays, Source: "config"}
-	var raw []byte
-	err := s.pool.QueryRow(ctx, `
-		SELECT bundle->'module_settings'->'data'->'wiki'->'revision_retention_days'
-		  FROM den_link WHERE id = 1`).Scan(&raw)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && (raw == nil || string(raw) == "null")) {
-		return local, nil
+// (docs/concepts/module-settings.md), when Den sends a whole number of days
+// (0 or more); otherwise the local setting.
+func (s *Service) RevisionRetention() Retention {
+	if s.moduleSettings != nil {
+		if days, ok := s.moduleSettings().Days("wiki.revision_retention_days"); ok {
+			return Retention{Days: days, Source: "den"}
+		}
 	}
-	if err != nil {
-		return local, err
-	}
-	var days float64
-	if json.Unmarshal(raw, &days) != nil || days < 0 || days != math.Trunc(days) {
-		return local, nil
-	}
-	return Retention{Days: int(days), Source: "den"}, nil
+	return Retention{Days: s.retentionDays, Source: "config"}
 }
 
 // ListRevisions returns a page's history, newest first (view access).
