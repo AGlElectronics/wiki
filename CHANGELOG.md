@@ -25,6 +25,13 @@ counts rebuilds of the same version. Rebuilds get no entry here.
 - Page history with restore, a trash, and an offboarding hook that HR
   calls to hand a departing volunteer's private notes to the admins.
 - Databases (tables, boards, calendars) for small structured lists.
+- Sharing with a group ignores upper and lower case and a leading `/`, so a
+  grant to `Dept-Security` matches Keycloak's `/dept-security`. A nested
+  group keeps its full path: a grant to `/org/dept-x` never matches a plain
+  `dept-x`. The share dialog still shows the name as it was typed.
+  Migration `20261114000001` rewrites existing group grants the same way;
+  two spellings of one group on the same space or page become one grant
+  with the higher level.
 - `DEN_MODE=required` keeps the module locked until it is paired with Den:
   the API answers `503 den_pairing_required` (except health, brand, sign-in
   and the Den connection routes) and the public `GET /api/den/state`

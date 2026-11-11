@@ -362,6 +362,80 @@ func TestSpacesAndPageAccess(t *testing.T) {
 	mustStatus(t, code, 404, "security without the group")
 }
 
+// TestGroupGrantNormalisation: a group grant matches the token's groups
+// whatever the case or a leading "/", keeps the typed name for display,
+// and never lets a nested path stand in for a plain name.
+func TestGroupGrantNormalisation(t *testing.T) {
+	h := setupRouter(t)
+	keycloakStyle := identity{user: "kim", groups: "/Dept-Security"}
+	nested := identity{user: "nina", groups: "/org/dept-security"}
+	for _, id := range []identity{editor, keycloakStyle, nested, other} {
+		userID(t, h, id)
+	}
+
+	code, sp := call(t, h, editor, "POST", "/api/v1/spaces", map[string]any{"name": "Ops"})
+	mustStatus(t, code, 201, "create space")
+	spaceID := str(sp, "id")
+	code, sp = call(t, h, editor, "PUT", "/api/v1/spaces/"+spaceID+"/grants",
+		map[string]any{"principal_kind": "group", "principal": " DEPT-security ", "level": "view"})
+	mustStatus(t, code, 200, "grant DEPT-security")
+	var grant map[string]any
+	for _, g := range list(sp, "grants") {
+		if str(g, "principal_kind") == "group" {
+			grant = g
+		}
+	}
+	if str(grant, "principal") != "dept-security" || str(grant, "display_name") != "DEPT-security" {
+		t.Fatalf("group grant = %v, want principal dept-security shown as DEPT-security", grant)
+	}
+
+	code, _ = call(t, h, keycloakStyle, "GET", "/api/v1/spaces/"+spaceID+"/pages", nil)
+	mustStatus(t, code, 200, "/Dept-Security matches the grant")
+	code, _ = call(t, h, nested, "GET", "/api/v1/spaces/"+spaceID+"/pages", nil)
+	mustStatus(t, code, 404, "/org/dept-security is another group")
+
+	// The same group typed differently updates the one grant.
+	code, sp = call(t, h, editor, "PUT", "/api/v1/spaces/"+spaceID+"/grants",
+		map[string]any{"principal_kind": "group", "principal": "/dept-security", "level": "edit"})
+	mustStatus(t, code, 200, "regrant /dept-security")
+	groups := 0
+	for _, g := range list(sp, "grants") {
+		if str(g, "principal_kind") == "group" {
+			groups++
+			if str(g, "level") != "edit" {
+				t.Fatalf("grant level = %q, want edit", str(g, "level"))
+			}
+		}
+	}
+	if groups != 1 {
+		t.Fatalf("want one group grant after retyping the name, got %d", groups)
+	}
+
+	// Page grants and the "shared with me" list use the same rule.
+	code, pg := call(t, h, editor, "POST", "/api/v1/spaces/"+spaceID+"/pages", map[string]any{"title": "Runbook"})
+	mustStatus(t, code, 201, "create page")
+	page := str(pg, "id")
+	code, _ = call(t, h, editor, "PUT", "/api/v1/pages/"+page+"/grants",
+		map[string]any{"principal_kind": "group", "principal": "Dept-Bar", "level": "view"})
+	mustStatus(t, code, 200, "share the page with Dept-Bar")
+	code, body := call(t, h, other, "GET", "/api/v1/spaces", nil)
+	mustStatus(t, code, 200, "olga lists spaces")
+	if shared := list(body, "shared"); len(shared) != 1 || str(shared[0], "id") != page {
+		t.Fatalf("olga (dept-bar) should see Runbook as shared, got %v", shared)
+	}
+
+	// Removing works with any spelling.
+	code, _ = call(t, h, editor, "PUT", "/api/v1/spaces/"+spaceID+"/grants",
+		map[string]any{"principal_kind": "group", "principal": "Dept-Security", "level": ""})
+	mustStatus(t, code, 200, "remove the group grant")
+	code, _ = call(t, h, keycloakStyle, "GET", "/api/v1/spaces/"+spaceID+"/pages", nil)
+	mustStatus(t, code, 404, "access gone after removal")
+
+	code, _ = call(t, h, editor, "PUT", "/api/v1/spaces/"+spaceID+"/grants",
+		map[string]any{"principal_kind": "group", "principal": " / ", "level": "view"})
+	mustStatus(t, code, 422, "a group name that normalises to nothing")
+}
+
 // TestPrivateSpace covers the owner's pages and sharing one of them.
 func TestPrivateSpace(t *testing.T) {
 	h := setupRouter(t)

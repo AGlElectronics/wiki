@@ -22,6 +22,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -51,11 +52,32 @@ type querier interface {
 
 // Grant gives a person or an IdP group a level on a space or page.
 type Grant struct {
-	PrincipalKind string       `json:"principal_kind"`
-	Principal     string       `json:"principal"`
-	Level         domain.Level `json:"level"`
-	// DisplayName is the person's name, or the group name.
+	PrincipalKind string `json:"principal_kind"`
+	// Principal is the person's id, or the normalised group name (groupKey).
+	Principal string       `json:"principal"`
+	Level     domain.Level `json:"level"`
+	// DisplayName is the person's name, or the group name as it was typed.
 	DisplayName string `json:"display_name"`
+}
+
+// groupKey is the form group grants are stored and matched in: trimmed,
+// one leading "/" removed (Keycloak's full-path form), lower-cased. Full
+// paths stay full paths, so "/org/dept-x" never matches a plain "dept-x".
+// Migration 20261114000001 applies the same rule in SQL.
+// TODO(shared/groupmatch): replace with the suite-wide function once it lands.
+func groupKey(g string) string {
+	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(g), "/"))
+}
+
+// groupKeys normalises a token's groups for matching against grants.
+func groupKeys(groups []string) []string {
+	out := make([]string, 0, len(groups))
+	for _, g := range groups {
+		if k := groupKey(g); k != "" {
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 func (g Grant) matches(c Caller) bool {
@@ -63,7 +85,7 @@ func (g Grant) matches(c Caller) bool {
 	case domain.PrincipalUser:
 		return g.Principal == c.UserID.String()
 	case domain.PrincipalGroup:
-		return slices.Contains(c.Groups, g.Principal)
+		return slices.ContainsFunc(c.Groups, func(have string) bool { return groupKey(have) == g.Principal })
 	}
 	return false
 }
@@ -167,7 +189,7 @@ func loadSpace(ctx context.Context, q querier, spaceID uuid.UUID, lock bool) (*s
 		return nil, err
 	}
 	s.grants, err = loadGrants(ctx, q, `
-		SELECT g.space_id, g.principal_kind, g.principal, g.level, COALESCE(u.display_name, g.principal)
+		SELECT g.space_id, g.principal_kind, g.principal, g.level, COALESCE(u.display_name, NULLIF(g.principal_display, ''), g.principal)
 		  FROM space_grants g
 		  LEFT JOIN users u ON g.principal_kind = 'user' AND u.id::text = g.principal
 		 WHERE g.space_id = $1
@@ -207,7 +229,7 @@ func loadTree(ctx context.Context, q querier, spaceID uuid.UUID, lock bool) (*tr
 		return nil, err
 	}
 	_, err = loadGrants(ctx, q, `
-		SELECT g.page_id, g.principal_kind, g.principal, g.level, COALESCE(u.display_name, g.principal)
+		SELECT g.page_id, g.principal_kind, g.principal, g.level, COALESCE(u.display_name, NULLIF(g.principal_display, ''), g.principal)
 		  FROM page_grants g
 		  JOIN pages p ON p.id = g.page_id
 		  LEFT JOIN users u ON g.principal_kind = 'user' AND u.id::text = g.principal

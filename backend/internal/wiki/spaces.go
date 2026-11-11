@@ -277,9 +277,12 @@ type GrantInput struct {
 	PrincipalKind string `json:"principal_kind"`
 	Principal     string `json:"principal"`
 	Level         string `json:"level"`
+	// display is the group name as typed; Principal becomes its groupKey.
+	display string
 }
 
-// validate checks the input and, for people, that they exist.
+// validate checks the input and, for people, that they exist. A group name
+// is normalised (groupKey); the typed form is kept for display.
 func (in *GrantInput) validate(ctx context.Context, q querier) (remove bool, err error) {
 	in.Principal = strings.TrimSpace(in.Principal)
 	switch in.PrincipalKind {
@@ -297,9 +300,11 @@ func (in *GrantInput) validate(ctx context.Context, q querier) (remove bool, err
 		}
 		in.Principal = id.String()
 	case domain.PrincipalGroup:
-		if in.Principal == "" || len(in.Principal) > 200 {
+		if groupKey(in.Principal) == "" || len(in.Principal) > 200 {
 			return false, httperror.Validation("invalid grant", map[string]string{"principal": "a group name"})
 		}
+		in.display = in.Principal
+		in.Principal = groupKey(in.Principal)
 	default:
 		return false, httperror.Validation("invalid grant", map[string]string{"principal_kind": "user or group"})
 	}
@@ -331,9 +336,10 @@ func (s *Service) SetSpaceGrant(ctx context.Context, c Caller, id uuid.UUID, in 
 			id, in.PrincipalKind, in.Principal)
 	} else {
 		_, err = s.pool.Exec(ctx, `
-			INSERT INTO space_grants (space_id, principal_kind, principal, level) VALUES ($1, $2, $3, $4)
-			ON CONFLICT (space_id, principal_kind, principal) DO UPDATE SET level = EXCLUDED.level`,
-			id, in.PrincipalKind, in.Principal, in.Level)
+			INSERT INTO space_grants (space_id, principal_kind, principal, level, principal_display) VALUES ($1, $2, $3, $4, $5)
+			ON CONFLICT (space_id, principal_kind, principal)
+			DO UPDATE SET level = EXCLUDED.level, principal_display = EXCLUDED.principal_display`,
+			id, in.PrincipalKind, in.Principal, in.Level, in.display)
 	}
 	if err != nil {
 		return Space{}, err

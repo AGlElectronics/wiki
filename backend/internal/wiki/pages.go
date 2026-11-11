@@ -509,9 +509,10 @@ func (s *Service) SetPageGrant(ctx context.Context, c Caller, id uuid.UUID, in G
 			return err
 		}
 		_, err = tx.Exec(ctx, `
-			INSERT INTO page_grants (page_id, principal_kind, principal, level) VALUES ($1, $2, $3, $4)
-			ON CONFLICT (page_id, principal_kind, principal) DO UPDATE SET level = EXCLUDED.level`,
-			id, in.PrincipalKind, in.Principal, in.Level)
+			INSERT INTO page_grants (page_id, principal_kind, principal, level, principal_display) VALUES ($1, $2, $3, $4, $5)
+			ON CONFLICT (page_id, principal_kind, principal)
+			DO UPDATE SET level = EXCLUDED.level, principal_display = EXCLUDED.principal_display`,
+			id, in.PrincipalKind, in.Principal, in.Level, in.display)
 		return err
 	})
 	if err != nil {
@@ -566,10 +567,7 @@ func (s *Service) pageOrGone(ctx context.Context, c Caller, id uuid.UUID) (Page,
 // Shared lists pages shared with the caller (by person or group) in
 // spaces they cannot otherwise see, topmost first.
 func (s *Service) Shared(ctx context.Context, c Caller) ([]SharedPage, error) {
-	groups := c.Groups
-	if groups == nil {
-		groups = []string{}
-	}
+	groups := groupKeys(c.Groups)
 	rows, err := s.pool.Query(ctx, `
 		SELECT DISTINCT p.space_id FROM page_grants g JOIN pages p ON p.id = g.page_id
 		 WHERE (g.principal_kind = 'user' AND g.principal = $1)
