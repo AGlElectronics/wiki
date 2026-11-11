@@ -127,7 +127,13 @@ counts rebuilds of the same version. Rebuilds get no entry here.
   `HR_DIRECTORY_URL` and `IDP_DIRECTORY_*`; `networkPolicy.hr.enabled`
   (off by default) lets the backend reach HR for the group picker, and
   `networkPolicy.keycloakAdmin.enabled` lets it reach Keycloak's admin API
-  for the same picker when standalone. To show Wiki's roles in HR's access
+  for the same picker when standalone. The chart's `config:` also sets
+  `OIDC_AUDIENCE: wiki-api`, `OIDC_GROUPS_CLAIM`, `OIDC_GROUP_MATCH`,
+  `OIDC_GROUP_PREFIX` and `DEN_ALLOWED_HOSTS`; `existingSecret` must hold
+  `DEN_LINK_ENCRYPTION_KEY` (and may hold `DEN_LINK_ENCRYPTION_KEY_PREVIOUS`
+  and `HR_SERVICE_TOKEN`). `frontend.securityHeaders.keycloakOrigin` and
+  `.denOrigin` fill the web app's Content Security Policy (the Keycloak
+  origin defaults to `config.OIDC_ISSUER_URL`'s). To show Wiki's roles in HR's access
   picker and receive HR's offboarding hook, add Wiki to HR's
   `ROLE_CATALOG_SOURCES` and `networkPolicy.moduleEgressNamespaces` (setup
   step 8).
