@@ -15,20 +15,17 @@ import { SettingsPage } from '@/pages/SettingsPage';
 import { PublicSharePage } from '@/pages/SharePage';
 import { SpacePage } from '@/pages/SpacePage';
 import { TrashPage } from '@/pages/TrashPage';
-import { getUserManager, isOidcAuthMode } from '@/auth/oidc';
+import { ensureUser, isOidcAuthMode } from '@/auth/oidc';
 
-// In OIDC mode a route behind the Layout checks there is a cached user
-// before letting the component mount. If not, we redirect to /login and
-// carry the attempted path so the post-login redirect lands there.
+// In OIDC mode a route behind the Layout checks there is a user (in memory,
+// or by a silent sign-in after a reload) before letting the component
+// mount. If not, we redirect to /login and carry the attempted path so the
+// post-login redirect lands there.
 async function requireAuth(fullPath: string) {
   if (!isOidcAuthMode()) {
     return; // dev mode: nothing to check
   }
-  const mgr = getUserManager();
-  if (!mgr) {
-    throw redirect({ to: '/login', search: { redirect: fullPath } });
-  }
-  const user = await mgr.getUser();
+  const user = await ensureUser();
   if (!user || user.expired) {
     throw redirect({ to: '/login', search: { redirect: fullPath } });
   }

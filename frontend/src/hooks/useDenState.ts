@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { ApiError, apiRequest } from '@/api/client';
 
-export type DenState = { mode: 'required' | 'standalone'; paired: boolean };
+/** revoked: Den rejected the stored credential; an admin must pair again. */
+export type DenState = { mode: 'required' | 'standalone'; paired: boolean; revoked?: boolean };
 
 /** Backends from before DEN_MODE have no state endpoint (404); they never require pairing. */
 export async function getDenState(signal?: AbortSignal): Promise<DenState> {
