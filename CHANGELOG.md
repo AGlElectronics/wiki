@@ -38,7 +38,7 @@ counts rebuilds of the same version. Rebuilds get no entry here.
 - Revision retention: `WIKI_REVISION_RETENTION_DAYS` (default `0`, keep
   every revision) deletes page revisions older than that many days, every
   hour, from S3 and the database. Once paired, Den can set it for Wiki in
-  its module settings (`retention.revision_days` in the integration
+  its module settings (`module_settings.wiki.revision_retention_days` in the integration
   bundle), which wins over the local value. The history panel says how long
   revisions are kept, and `GET /api/v1/pages/{page}/revisions` returns
   `retention_days` and `retention_source`.

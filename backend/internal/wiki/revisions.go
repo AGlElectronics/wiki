@@ -36,7 +36,7 @@ type Retention struct {
 // Set it before serving requests.
 func (s *Service) SetRevisionRetentionDays(days int) { s.retentionDays = days }
 
-// RevisionRetention is Den's module setting retention.revision_days
+// RevisionRetention is Den's module setting wiki.revision_retention_days
 // (module_settings.data in the integration bundle stored with the pairing,
 // docs/concepts/module-settings.md), when Den sends a whole number of days
 // (0 or more); otherwise the local setting. The shared denlink.Bundle has
@@ -45,7 +45,7 @@ func (s *Service) RevisionRetention(ctx context.Context) (Retention, error) {
 	local := Retention{Days: s.retentionDays, Source: "config"}
 	var raw []byte
 	err := s.pool.QueryRow(ctx, `
-		SELECT bundle->'module_settings'->'data'->'retention'->'revision_days'
+		SELECT bundle->'module_settings'->'data'->'wiki'->'revision_retention_days'
 		  FROM den_link WHERE id = 1`).Scan(&raw)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && (raw == nil || string(raw) == "null")) {
 		return local, nil

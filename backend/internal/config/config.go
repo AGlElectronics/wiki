@@ -106,7 +106,7 @@ type Config struct {
 
 	// RevisionRetentionDays deletes page revisions older than this many
 	// days. 0 keeps every revision. Once paired, Den's integration bundle
-	// overrides it (retention.revision_days).
+	// overrides it (module_settings wiki.revision_retention_days).
 	RevisionRetentionDays int
 
 	// Group picker directories (package directory). HR is used while the

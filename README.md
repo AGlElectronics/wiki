@@ -114,7 +114,8 @@ rename and delete).
 - Trashing needs full access, or edit access on a page you created.
   Deleting forever needs full access.
 
-Group grants match the `groups` claim on the token, ignoring case and a
+Group grants match the groups claim on the token (`OIDC_GROUPS_CLAIM`,
+default `groups`; never `roles`) with the suite's shared rule, ignoring case and a
 leading `/` (a nested group keeps its full path), so removing someone from
 a Keycloak group revokes that access on their next request. The share
 dialog's group picker lists HR's departments and access groups (paired

@@ -148,7 +148,7 @@ touching the websocket protocol or the S3 layout.
 
 Revisions: at most one every 10 minutes of editing per page, plus one
 before every restore. Kept forever by default; `WIKI_REVISION_RETENTION_DAYS`
-(or Den's module settings, `retention.revision_days` in the integration
+(or Den's module settings, `module_settings.wiki.revision_retention_days` in the integration
 bundle) deletes revisions older than N days, hourly, S3 object first and
 then the row.
 
@@ -184,10 +184,11 @@ Page access:
   cache only if it gets slow.
 - Group grants use the `groups` claim of the token on every request, so
   removing someone from a Keycloak group revokes access on their next
-  request, same as every other module. Names are compared trimmed,
-  lower-cased and without one leading `/`; full paths stay full paths
-  (`groupKey` in `internal/wiki/access.go`, to be replaced by the
-  suite-wide `shared/groupmatch`).
+  request, same as every other module. Groups come only from
+  `OIDC_GROUPS_CLAIM` and are compared with the suite-wide rule
+  (`internal/groupmatch`, a copy of `con-services` `shared/go/groupmatch`):
+  trimmed, lower-cased, one leading `/` removed, full paths by default
+  (`OIDC_GROUP_MATCH`, `OIDC_GROUP_PREFIX`).
 - Pages without view access return 404 (never 403 confirming they exist),
   same rule as Learn's unpublished courses. Search, backlinks and the
   sidebar filter by the same check.
@@ -372,6 +373,14 @@ would contain the page tree but no page content.
   subject (subject alone, logged, when HR sends no issuer). The sweep, page
   deletion and space deletion delete rows and queue S3 content
   (`content_deletions`) in one transaction; the queue is retried hourly.
+
+- **Shared foundations** (con-services 1.0): Wiki carries generated copies
+  of `groupmatch`, `denlink` and `authbase` (`scripts/sync-shared`, never
+  edited by hand; CI checks drift). This brings the safe auth defaults,
+  the encrypted and revocable Den link, the token contract (access tokens
+  for `wiki-api`, kept in memory in the browser) and the role catalog
+  contract (`HR_SERVICE_TOKEN`, `privileged`). Den's revision retention
+  override is the module setting `wiki.revision_retention_days`.
 
 ## Open questions
 
