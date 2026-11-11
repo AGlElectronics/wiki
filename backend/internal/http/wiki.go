@@ -606,6 +606,8 @@ func (h *wikiHandler) duplicatePage(r *http.Request, c wiki.Caller) (int, any, e
 type commentBody struct {
 	Body     json.RawMessage `json:"body"`
 	Metadata json.RawMessage `json:"metadata"`
+	// Anchored (new threads only; default true) ties the thread to text.
+	Anchored *bool `json:"anchored"`
 }
 
 func (h *wikiHandler) listThreads(r *http.Request, c wiki.Caller) (int, any, error) {
@@ -626,7 +628,8 @@ func (h *wikiHandler) createThread(r *http.Request, c wiki.Caller) (int, any, er
 	if err := decodeJSON(r, &in); err != nil {
 		return 0, nil, err
 	}
-	return created(h.svc.CreateThread(r.Context(), c, id, in.Body, in.Metadata))
+	anchored := in.Anchored == nil || *in.Anchored
+	return created(h.svc.CreateThread(r.Context(), c, id, in.Body, in.Metadata, anchored))
 }
 
 func (h *wikiHandler) addComment(r *http.Request, c wiki.Caller) (int, any, error) {

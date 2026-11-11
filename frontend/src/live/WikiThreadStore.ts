@@ -1,8 +1,13 @@
 // BlockNote ThreadStore backed by the wiki's REST comments API. The server
-// enforces the real rules (comment level writes, authors edit their own,
-// editors delete); DefaultThreadStoreAuth only mirrors them for the UI.
+// enforces the real rules (comment level replies, authors edit their own,
+// editors delete); WikiThreadStoreAuth only mirrors them for the UI.
 // Thread anchors live as marks in the Yjs document, so they sync live; the
 // thread contents are fetched here and refreshed by polling.
+//
+// This store only holds anchored (inline) threads. Writing the anchor
+// changes the document, which the server accepts from editors only, so
+// comment-level people cannot start inline threads here; they start
+// page-level discussions in PageDiscussions instead.
 import {
   DefaultThreadStoreAuth,
   ThreadStore,
@@ -59,6 +64,20 @@ function toThreadData(t: RawThread): ThreadData {
   };
 }
 
+/** DefaultThreadStoreAuth, except that only editors start (anchored) threads. */
+export class WikiThreadStoreAuth extends DefaultThreadStoreAuth {
+  constructor(
+    userId: string,
+    private readonly editor: boolean
+  ) {
+    super(userId, editor ? 'editor' : 'comment');
+  }
+
+  canCreateThread() {
+    return this.editor;
+  }
+}
+
 export class WikiThreadStore extends ThreadStore {
   private threads = new Map<string, ThreadData>();
   private listeners = new Set<(threads: Map<string, ThreadData>) => void>();
@@ -69,7 +88,7 @@ export class WikiThreadStore extends ThreadStore {
     userId: string,
     role: 'editor' | 'comment'
   ) {
-    super(new DefaultThreadStoreAuth(userId, role));
+    super(new WikiThreadStoreAuth(userId, role === 'editor'));
   }
 
   // Marks are created by the default TipTap behaviour; no override needed.
@@ -80,6 +99,7 @@ export class WikiThreadStore extends ThreadStore {
   }
 
   private apply(t: RawThread) {
+    if (!t.anchored) return;
     this.threads = new Map(this.threads);
     this.threads.set(t.id, toThreadData(t));
     this.emit();
@@ -88,7 +108,7 @@ export class WikiThreadStore extends ThreadStore {
   private refresh = async () => {
     try {
       const raw = await listThreads(this.pageId);
-      this.threads = new Map(raw.map((t) => [t.id, toThreadData(t)]));
+      this.threads = new Map(raw.filter((t) => t.anchored).map((t) => [t.id, toThreadData(t)]));
       this.emit();
     } catch {
       // Offline or access just changed; the next poll retries.
@@ -108,7 +128,7 @@ export class WikiThreadStore extends ThreadStore {
   }
 
   async createThread(options: { initialComment: { body: CommentBody; metadata?: unknown }; metadata?: unknown }) {
-    const t = await createThread(this.pageId, options.initialComment.body, options.metadata);
+    const t = await createThread(this.pageId, options.initialComment.body, options.metadata, true);
     this.apply(t);
     return toThreadData(t);
   }

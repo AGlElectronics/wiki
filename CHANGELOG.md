@@ -19,6 +19,13 @@ counts rebuilds of the same version. Rebuilds get no entry here.
   live by several people at once, with comment threads.
 - Search over titles and text, mentions and backlinks, favourites and page
   templates.
+- Two kinds of discussion: comments on a piece of text (inline, need edit
+  access, because the anchor is stored in the page) and page-level
+  discussions under the page, which anyone with comment access can start.
+  Comment access also replies to, resolves and reacts in both kinds.
+  `POST /api/v1/pages/{page}/threads` takes `"anchored": false` for a
+  page-level discussion; threads report `anchored`. Migration
+  `20261116000001` marks existing threads as inline.
 - Access follows the organisation's groups; sensitive pages can be
   restricted, and a single page can be published read-only with a link
   that expires (when Den's `wiki_public_links` allows it).

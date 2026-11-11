@@ -317,6 +317,8 @@ export type RawComment = {
 export type RawThread = {
   id: string;
   page_id: string;
+  /** true: tied to text in the page (needs edit to start); false: a page-level discussion. */
+  anchored: boolean;
   resolved: boolean;
   resolved_by: string | null;
   resolved_at: string | null;
@@ -329,8 +331,9 @@ export type RawThread = {
 export const listThreads = (pageId: string, signal?: AbortSignal) =>
   apiRequest<{ threads: RawThread[] }>(`/api/v1/pages/${pageId}/threads`, { signal }).then((r) => r.threads);
 
-export const createThread = (pageId: string, body: unknown, metadata?: unknown) =>
-  apiRequest<RawThread>(`/api/v1/pages/${pageId}/threads`, { method: 'POST', body: { body, metadata } });
+/** anchored threads (inline comments) need edit access; page-level ones need comment access. */
+export const createThread = (pageId: string, body: unknown, metadata?: unknown, anchored = true) =>
+  apiRequest<RawThread>(`/api/v1/pages/${pageId}/threads`, { method: 'POST', body: { body, metadata, anchored } });
 
 export const addThreadComment = (threadId: string, body: unknown) =>
   apiRequest<RawThread>(`/api/v1/threads/${threadId}/comments`, { method: 'POST', body: { body } });

@@ -33,6 +33,7 @@ import { DatabaseView } from '@/components/DatabaseView';
 import { HistoryPanel } from '@/components/HistoryPanel';
 import { downloadText, importMarkdownFile, pickMarkdownFile } from '@/lib/markdown';
 import { LiveStatusText, PageEditor, Presence, useLivePage } from '@/components/PageEditor';
+import { PageDiscussions } from '@/components/PageDiscussions';
 import { useCreatePage, useTree } from '@/components/PageTree';
 import { ShareDialog } from '@/components/ShareDialog';
 import { Button } from '@/components/ui/Button';
@@ -381,6 +382,8 @@ function PageBody({ page }: { page: Page }) {
           ) : null}
         </section>
       ) : null}
+
+      <PageDiscussions pageId={page.id} level={page.access} />
 
       <Backlinks pageId={page.id} />
 

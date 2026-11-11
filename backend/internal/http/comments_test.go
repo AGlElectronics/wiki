@@ -1,7 +1,8 @@
 package http_test
 
-// Inline discussions: the comment level writes, view only reads, authors
-// edit their own comments, editors delete threads.
+// Discussions: the comment level starts page-level threads and replies,
+// anchoring to text needs edit, view only reads, authors edit their own
+// comments, editors delete threads.
 
 import (
 	"testing"
@@ -37,11 +38,30 @@ func TestComments(t *testing.T) {
 	code, _ = call(t, h, security, "PATCH", "/api/v1/pages/"+page, map[string]any{"title": "Nope"})
 	mustStatus(t, code, 403, "comment level renames the page")
 
-	// View cannot start threads; comment can.
-	code, _ = call(t, h, other, "POST", "/api/v1/pages/"+page+"/threads", body("hi"))
+	// View cannot start threads. The comment level starts page-level
+	// discussions; a thread anchored to text (the default) needs edit,
+	// because the anchor is a mark in the document.
+	pageLevel := func(text string) map[string]any {
+		b := body(text)
+		b["anchored"] = false
+		return b
+	}
+	code, _ = call(t, h, other, "POST", "/api/v1/pages/"+page+"/threads", pageLevel("hi"))
 	mustStatus(t, code, 403, "view-only starts a thread")
-	code, th := call(t, h, security, "POST", "/api/v1/pages/"+page+"/threads", body("is this right?"))
-	mustStatus(t, code, 201, "security starts a thread")
+	code, _ = call(t, h, security, "POST", "/api/v1/pages/"+page+"/threads", body("anchored"))
+	mustStatus(t, code, 403, "comment level anchors a thread to text")
+	code, th := call(t, h, editor, "POST", "/api/v1/pages/"+page+"/threads", body("inline note"))
+	mustStatus(t, code, 201, "editor anchors a thread to text")
+	if th["anchored"] != true {
+		t.Fatalf("an editor's default thread is anchored: %v", th)
+	}
+	code, _ = call(t, h, editor, "DELETE", "/api/v1/threads/"+str(th, "id"), nil)
+	mustStatus(t, code, 204, "editor deletes the inline thread")
+	code, th = call(t, h, security, "POST", "/api/v1/pages/"+page+"/threads", pageLevel("is this right?"))
+	mustStatus(t, code, 201, "security starts a page-level discussion")
+	if th["anchored"] != false {
+		t.Fatalf("a page-level discussion is not anchored: %v", th)
+	}
 	threadID := str(th, "id")
 	comments := list(th, "comments")
 	if len(comments) != 1 {

@@ -14,9 +14,16 @@ import (
 )
 
 // Access rules mirror BlockNote's DefaultThreadStoreAuth so the UI and the
-// server agree: comment level starts threads, replies, resolves and
-// reacts; authors edit their own comments; comment authors or editors
-// delete comments; editors delete whole threads.
+// server agree: comment level replies, resolves and reacts; authors edit
+// their own comments; comment authors or editors delete comments; editors
+// delete whole threads.
+//
+// Starting a thread: an anchored (inline) thread is tied to a comment mark
+// the browser writes into the page's Yjs document, and the relay drops
+// document updates from connections below edit (ADR 0001: the server never
+// decodes Yjs, so it cannot let only the mark through). Anchored threads
+// therefore need edit access; comment level starts page-level discussions,
+// which have no anchor.
 
 // Reaction is one emoji on a comment with everyone who sent it.
 type Reaction struct {
@@ -38,10 +45,13 @@ type Comment struct {
 	DeletedAt *time.Time      `json:"deleted_at"`
 }
 
-// Thread is one discussion anchored to a page.
+// Thread is one discussion on a page.
 type Thread struct {
-	ID         uuid.UUID       `json:"id"`
-	PageID     uuid.UUID       `json:"page_id"`
+	ID     uuid.UUID `json:"id"`
+	PageID uuid.UUID `json:"page_id"`
+	// Anchored threads are tied to text in the page; the others are
+	// page-level discussions.
+	Anchored   bool            `json:"anchored"`
 	Resolved   bool            `json:"resolved"`
 	ResolvedBy *uuid.UUID      `json:"resolved_by"`
 	ResolvedAt *time.Time      `json:"resolved_at"`
@@ -115,14 +125,14 @@ func (s *Service) Threads(ctx context.Context, c Caller, pageID uuid.UUID) ([]Th
 		return nil, err
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, page_id, resolved, resolved_by, resolved_at, metadata, created_at, updated_at
+		SELECT id, page_id, anchored, resolved, resolved_by, resolved_at, metadata, created_at, updated_at
 		  FROM comment_threads WHERE page_id = $1 ORDER BY created_at, id`, pageID)
 	if err != nil {
 		return nil, err
 	}
 	threads, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (Thread, error) {
 		var t Thread
-		err := r.Scan(&t.ID, &t.PageID, &t.Resolved, &t.ResolvedBy, &t.ResolvedAt, &t.Metadata, &t.CreatedAt, &t.UpdatedAt)
+		err := r.Scan(&t.ID, &t.PageID, &t.Anchored, &t.Resolved, &t.ResolvedBy, &t.ResolvedAt, &t.Metadata, &t.CreatedAt, &t.UpdatedAt)
 		t.Comments = []Comment{}
 		return t, err
 	})
@@ -209,13 +219,21 @@ func (s *Service) thread(ctx context.Context, c Caller, threadID uuid.UUID) (Thr
 	return Thread{}, httperror.NotFound("thread")
 }
 
-// CreateThread starts a discussion with its first comment (comment access).
-func (s *Service) CreateThread(ctx context.Context, c Caller, pageID uuid.UUID, body, metadata json.RawMessage) (Thread, error) {
+// CreateThread starts a discussion with its first comment: anchored to
+// text with edit access, page-level with comment access.
+func (s *Service) CreateThread(ctx context.Context, c Caller, pageID uuid.UUID, body, metadata json.RawMessage, anchored bool) (Thread, error) {
 	l, err := s.pageLevel(ctx, c, pageID)
 	if err != nil {
 		return Thread{}, err
 	}
-	if err := need(l, domain.LevelComment); err != nil {
+	want := domain.LevelComment
+	if anchored {
+		want = domain.LevelEdit
+	}
+	if err := need(l, want); err != nil {
+		if anchored && l >= domain.LevelComment {
+			return Thread{}, httperror.New(httperror.CodeForbidden, "comments on text need edit access; start a page discussion instead (anchored: false)")
+		}
 		return Thread{}, err
 	}
 	if err := validBody(body); err != nil {
@@ -231,8 +249,8 @@ func (s *Service) CreateThread(ctx context.Context, c Caller, pageID uuid.UUID, 
 	defer tx.Rollback(ctx) //nolint:errcheck
 	var threadID uuid.UUID
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO comment_threads (page_id, created_by, metadata) VALUES ($1, $2, $3) RETURNING id`,
-		pageID, c.UserID, metadata).Scan(&threadID); err != nil {
+		INSERT INTO comment_threads (page_id, created_by, metadata, anchored) VALUES ($1, $2, $3, $4) RETURNING id`,
+		pageID, c.UserID, metadata, anchored).Scan(&threadID); err != nil {
 		return Thread{}, err
 	}
 	if _, err := tx.Exec(ctx, `
