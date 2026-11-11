@@ -103,6 +103,14 @@ counts rebuilds of the same version. Rebuilds get no entry here.
   and the platform's `conservices-internal-ca` issuer; without them set
   `internalTLS.enabled: false`. See
   [Set up Wiki](https://aglelectronics.github.io/con-services/modules/wiki/setup/).
+  The chart's `config:` includes `WIKI_REVISION_RETENTION_DAYS`,
+  `HR_DIRECTORY_URL` and `IDP_DIRECTORY_*`; `networkPolicy.hr.enabled`
+  (off by default) lets the backend reach HR for the group picker, and
+  `networkPolicy.keycloakAdmin.enabled` lets it reach Keycloak's admin API
+  for the same picker when standalone. To show Wiki's roles in HR's access
+  picker and receive HR's offboarding hook, add Wiki to HR's
+  `ROLE_CATALOG_SOURCES` and `networkPolicy.moduleEgressNamespaces` (setup
+  step 8).
 - Development: `infra/docker-compose.yml` with SeaweedFS as the S3 server
   (`localhost:9040`, bucket `wiki-data-dev`), and
   `infra/frontend-config/compose.json` (dev sign-in) mounted as the web
