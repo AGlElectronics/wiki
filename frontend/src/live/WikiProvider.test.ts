@@ -4,14 +4,16 @@
 import * as Y from 'yjs';
 import { afterEach, beforeEach, vi } from 'vitest';
 import { ApiError } from '@/api/client';
+import type * as ApiClient from '@/api/client';
+import type * as WikiApi from '@/api/wiki';
 import { WikiProvider } from '@/live/WikiProvider';
 
 vi.mock('@/api/client', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/client')>();
+  const actual = await importOriginal<typeof ApiClient>();
   return { ...actual, apiURL: (path: string) => new URL(path, 'http://wiki.test') };
 });
 vi.mock('@/api/wiki', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/wiki')>();
+  const actual = await importOriginal<typeof WikiApi>();
   return { ...actual, getLiveTicket: vi.fn() };
 });
 

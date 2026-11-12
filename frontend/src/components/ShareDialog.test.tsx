@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, vi } from 'vitest';
 import type { Page } from '@/api/wiki';
+import type * as WikiApi from '@/api/wiki';
 import { ShareDialog } from '@/components/ShareDialog';
 
 const navigate = vi.fn();
@@ -16,7 +17,7 @@ vi.mock('@tanstack/react-router', () => ({
 }));
 
 vi.mock('@/api/wiki', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/wiki')>();
+  const actual = await importOriginal<typeof WikiApi>();
   return {
     ...actual,
     listShareLinks: vi.fn().mockResolvedValue([]),

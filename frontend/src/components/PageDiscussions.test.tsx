@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, vi } from 'vitest';
 import type { Level, RawThread } from '@/api/wiki';
+import type * as WikiApi from '@/api/wiki';
 import { PageDiscussions } from '@/components/PageDiscussions';
 import { bodyToText, textToBody } from '@/lib/comments';
 
@@ -26,7 +27,7 @@ function thread(id: string, anchored: boolean, text: string): RawThread {
 }
 
 vi.mock('@/api/wiki', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/wiki')>();
+  const actual = await importOriginal<typeof WikiApi>();
   return {
     ...actual,
     listThreads: vi.fn(),

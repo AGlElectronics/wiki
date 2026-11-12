@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { vi } from 'vitest';
 import type { PageNode } from '@/api/wiki';
+import type * as WikiApi from '@/api/wiki';
 import { PageTree } from '@/components/PageTree';
 
 vi.mock('@tanstack/react-router', () => ({
@@ -38,7 +39,7 @@ const { tree } = vi.hoisted(() => {
 });
 
 vi.mock('@/api/wiki', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/wiki')>();
+  const actual = await importOriginal<typeof WikiApi>();
   return { ...actual, getTree: vi.fn().mockResolvedValue(tree) };
 });
 
