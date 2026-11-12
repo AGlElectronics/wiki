@@ -155,6 +155,10 @@ counts rebuilds of the same version. Rebuilds get no entry here.
 
 ### Changed
 
+- The Helm chart admits Den's backend (`networkPolicy.den`, on by default) for the role catalog and portal to-dos.
+- CI passes `den-major: "1"`. A release whose MAJOR is not 1 is refused once the shared `ci-v1` tag points at the workflow that has that input.
+- Standalone Compose uses PostgreSQL `postgres:16.15-alpine`.
+- The Helm chart description says CI renders and lints the chart; the first production install is still pending.
 - The shared Den client is the current copy from `con-services`. Go error
   text is lowercase; the sentence an admin sees when pairing fails, and
   the text stored in `den_link.last_error`, stays the original wording.

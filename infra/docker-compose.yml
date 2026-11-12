@@ -21,7 +21,7 @@ name: wiki
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16.15-alpine
     container_name: wiki-postgres
     restart: unless-stopped
     environment:
