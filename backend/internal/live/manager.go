@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -45,12 +46,20 @@ type Manager struct {
 
 // NewManager wires the live editing service. allowedOrigins are the
 // browser origins allowed to open websockets besides the API's own host.
+// Patterns are matched against the full Origin header (scheme + host), so
+// keep the scheme (https://wiki.example.org), not only the host.
 func NewManager(store *Store, svc *wiki.Service, allowedOrigins []string, log zerolog.Logger) *Manager {
 	var origins []string
 	for _, o := range allowedOrigins {
-		if u, err := url.Parse(o); err == nil && u.Host != "" {
-			origins = append(origins, u.Host)
+		o = strings.TrimSpace(o)
+		if o == "" {
+			continue
 		}
+		if u, err := url.Parse(o); err == nil && u.Scheme != "" && u.Host != "" {
+			origins = append(origins, u.Scheme+"://"+u.Host)
+			continue
+		}
+		origins = append(origins, o)
 	}
 	m := &Manager{
 		store: store, svc: svc, log: log, tickets: newTickets(), origins: origins,

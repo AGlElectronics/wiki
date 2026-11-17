@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Live editing websockets match the browser `Origin` header (full
+  `https://…` URL) against CORS allowed origins. Host-only matching
+  rejected every connection after Keycloak/CORS hardening, so pages stuck
+  on "Connecting…" / "Loading…".
+
 ## [1.0.0] - 2026-11-12
 
 Needs Den: 1.0.0 or later (Den MAJOR 1).
