@@ -11,6 +11,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -22,6 +23,10 @@ import (
 	"github.com/AGlElectronics/wiki/backend/internal/denlink"
 	"github.com/AGlElectronics/wiki/backend/internal/groupmatch"
 )
+
+// MinServiceTokenLength is the shortest accepted shared service token
+// (HR_SERVICE_TOKEN, STATS_PULL_TOKEN) when set.
+const MinServiceTokenLength = 32
 
 // AuthMode selects how incoming requests are authenticated (authbase).
 //
@@ -231,6 +236,12 @@ func Load() (*Config, error) {
 func (c *Config) validate(errs []string) error {
 	if c.DatabaseURL == "" {
 		errs = append(errs, "DATABASE_URL is required")
+	}
+	if c.HRServiceToken != "" && len(c.HRServiceToken) < MinServiceTokenLength {
+		errs = append(errs, fmt.Sprintf("HR_SERVICE_TOKEN must be at least %d characters (openssl rand -hex 32)", MinServiceTokenLength))
+	}
+	if c.StatsPullToken != "" && len(c.StatsPullToken) < MinServiceTokenLength {
+		errs = append(errs, fmt.Sprintf("STATS_PULL_TOKEN must be at least %d characters (openssl rand -hex 32)", MinServiceTokenLength))
 	}
 	if c.RevisionRetentionDays < 0 {
 		errs = append(errs, "WIKI_REVISION_RETENTION_DAYS must be 0 (keep every revision) or a number of days")
