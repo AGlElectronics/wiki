@@ -207,6 +207,7 @@ func NewRouter(deps Deps, version string) http.Handler {
 		internal := &internalHandler{svc: svc, token: deps.Config.ServiceToken}
 		internalLimiter := authbase.NewRateLimiter(authbase.RateLimitOptions{Rate: 1, Burst: 20})
 		api.With(internalLimiter.Middleware).Post("/internal/offboarded", internal.offboarded)
+		api.Get("/internal/stats", internalStatsHandler(deps.Config.StatsPullToken, deps.Pool))
 
 		// Public share links: read-only access for anyone with a link
 		// token, rate limited per client IP (120 a minute, bursts of 30),
